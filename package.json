@@ -1,0 +1,15 @@
+{
+  "name": "deepbot",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@12.18.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "nsh run apps/desktop",
+    "check": "pnpm -r typecheck && nsh check apps/desktop",
+    "agent": "pnpm --filter @deepbot/agent start"
+  }
+}

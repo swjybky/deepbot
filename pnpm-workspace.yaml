@@ -1,0 +1,7 @@
+packages:
+  - "packages/*"
+
+# Transitive deps of @earendil-works/pi-ai; their install scripts aren't needed.
+allowBuilds:
+  "@google/genai": false
+  protobufjs: false
