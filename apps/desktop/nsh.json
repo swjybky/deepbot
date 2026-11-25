@@ -3,5 +3,33 @@
   "id": "com.example.deepbot",
   "version": "1.0.0",
   "build": 1,
-  "rust": "."
+  "icon": "assets/deepbot.png",
+  "rust": ".",
+  "appearance": "light",
+  "theme": "theme.json",
+  "tailwind": {
+    "radius": {
+      "control": 8,
+      "field": 10,
+      "row": 12,
+      "card": 14,
+      "dialog": 18
+    },
+    "fontSize": {
+      "caption": [12, 1.5],
+      "meta": [12.5, 1.5],
+      "label": [13, 1.5],
+      "body": [14, 1.5],
+      "message": [15, 1.6],
+      "title": [16, 1.5],
+      "heading": [20, 1.5]
+    },
+    "shadow": {
+      "float": "0 2px 8px rgba(0, 0, 0, 0.05)",
+      "composer": "0 2px 10px rgba(0, 0, 0, 0.04)",
+      "dialog": "0 24px 60px rgba(0, 0, 0, 0.18)",
+      "popover": "0 8px 24px rgba(0, 0, 0, 0.10)",
+      "thumb": "0 1px 2px rgba(0, 0, 0, 0.2)"
+    }
+  }
 }

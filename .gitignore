@@ -8,3 +8,6 @@ target/
 .env.*
 !.env.example
 .DS_Store
+
+# 跨对话交接笔记
+notes/handoff/

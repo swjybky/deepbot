@@ -1,0 +1,27 @@
+{
+  "description": "用回车保存 Bot 名字和人设，添加规矩后验证焦点回到关键词",
+  "design": ["DESIGN.md", "design/components/dialog.md", "design/components/input.md"],
+  "steps": [
+    {"wait": "id:bot-xiaocai"},
+    {"press": "id:bot-pill"},
+    {"wait": "id:bot-info"},
+    {"press": "text:配置"},
+    {"wait": "id:bot-configuration"},
+    {"clear": "id:bot-config-name"},
+    {"type": ["id:bot-config-name", "验证小菜"]},
+    {"submit": "id:bot-config-name"},
+    {"wait": "label:查看 验证小菜 的信息"},
+    {"clear": "id:bot-config-instructions"},
+    {"type": ["id:bot-config-instructions", "回答尽量简短"]},
+    {"submit": "id:bot-config-instructions"},
+    {"screenshot": "01-configuration"},
+    {"press": "id:bot-config-rules"},
+    {"wait": "id:bot-config-rules-editor"},
+    {"type": ["id:rule-keywords", "周报，日报"]},
+    {"press": "id:rule-add"},
+    {"wait": "label:启用 周报，日报"},
+    {"screenshot": "02-rule-added"},
+    {"key": "a"},
+    {"value": ["id:rule-keywords", "a"]}
+  ]
+}

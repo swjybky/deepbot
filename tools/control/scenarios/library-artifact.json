@@ -1,0 +1,19 @@
+{
+  "description": "让隔离模型登记工作区中的合成文件，从资料库打开并核对实际文件内容",
+  "design": ["DESIGN.md", "design/components/list.md", "design/components/dialog.md"],
+  "steps": [
+    {"wait": "id:composer-input"},
+    {"type": ["id:composer-input", "DEEPBOT_VERIFY_ARTIFACT"]},
+    {"press": "id:composer-send"},
+    {"wait": "text:已发起资料库验证"},
+    {"press": "id:bot-pill"},
+    {"wait": "id:bot-info"},
+    {"press": "text:资料库"},
+    {"wait": "label:预览资料 验证产物.txt"},
+    {"screenshot": "01-artifact-listed"},
+    {"press": "label:预览资料 验证产物.txt"},
+    {"wait": "id:library-preview-text"},
+    {"wait": "text:这是隔离环境的资料库验证文件。"},
+    {"screenshot": "02-artifact-preview"}
+  ]
+}

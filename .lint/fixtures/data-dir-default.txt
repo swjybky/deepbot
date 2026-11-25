@@ -1,0 +1,2 @@
+import { homedir } from "node:os";
+export const cache = `${homedir()}/.deepbot/cache`;

@@ -1,0 +1,3 @@
+# NSH generates the host workspace, so patch its Linux backend here too.
+[patch.crates-io]
+nsh-platform-linux = { path = "vendor/nsh-platform-linux" }

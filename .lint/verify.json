@@ -1,0 +1,9 @@
+{
+  "rules": [
+    {
+      "id": "nsh-unknown-class",
+      "pattern": "unknown class",
+      "nextAction": "根据日志定位 class，核对 design/tokens.md 和 apps/desktop/nsh.json 后重新运行本次检查"
+    }
+  ]
+}

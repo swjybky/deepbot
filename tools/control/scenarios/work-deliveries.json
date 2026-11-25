@@ -1,0 +1,20 @@
+{
+  "description": "两个后台事项发出正文相同的交付，随后发送普通对话",
+  "design": ["DESIGN.md", "design/layout.md"],
+  "steps": [
+    {"wait": "id:bot-xiaocai"},
+    {"type": ["id:composer-input", "DEEPBOT_VERIFY_DELIVERIES"]},
+    {"press": "id:composer-send"},
+    {"wait": "text:修好了，可以验收"},
+    {"wait": "text:事项 · 修复消息菜单与复制"},
+    {"wait": "text:事项 · 修复图片粘贴与发送并核对多张截图、文件选择器、附件预览和重启后的历史消息显示"},
+    {"type": ["id:composer-input", "你好，验证普通对话"]},
+    {"press": "id:composer-send"},
+    {"wait": "text:DEEPBOT_VERIFY_OK"},
+    {"screenshot": "01-deliveries"},
+    {"press": "id:bot-pill"},
+    {"wait": "id:works-ended-toggle"},
+    {"press": "id:works-ended-toggle"},
+    {"screenshot": "02-panel"}
+  ]
+}

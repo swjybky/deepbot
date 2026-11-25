@@ -1,0 +1,18 @@
+{
+  "description": "打开小菜的信息栏，进入资料库，添加一条长期记忆并打开它的预览弹窗",
+  "design": ["DESIGN.md", "design/components/list.md", "design/components/dialog.md"],
+  "steps": [
+    {"wait": "id:bot-pill"},
+    {"press": "id:bot-pill"},
+    {"wait": "id:bot-info"},
+    {"press": "text:资料库"},
+    {"wait": "id:memory-input"},
+    {"type": ["id:memory-input", "我每周五写周报"]},
+    {"press": "id:memory-add"},
+    {"wait": "label:预览记忆 我每周五写周报"},
+    {"screenshot": "01-memory-added"},
+    {"press": "label:预览记忆 我每周五写周报 >> nth=0"},
+    {"wait": "id:library-preview"},
+    {"screenshot": "02-memory-preview"}
+  ]
+}

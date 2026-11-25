@@ -9,7 +9,10 @@
   },
   "scripts": {
     "dev": "nsh run apps/desktop",
-    "check": "pnpm -r typecheck && nsh check apps/desktop",
-    "agent": "pnpm --filter @deepbot/agent start"
+    "check": "node tools/control/cli.mjs check",
+    "agent": "pnpm --filter @deepbot/agent start",
+    "verify": "node tools/control/cli.mjs",
+    "test": "pnpm --filter @deepbot/agent test && nsh test apps/desktop",
+    "test:ui": "nsh test apps/desktop"
   }
 }

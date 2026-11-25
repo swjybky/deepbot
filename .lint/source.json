@@ -1,0 +1,196 @@
+{
+  "rules": [
+    {
+      "id": "nsh-base-button",
+      "include": ["apps/desktop/ui", "apps/desktop/App.tsx"],
+      "ext": [".tsx", ".ts"],
+      "check": "nsh-base-button",
+      "owners": ["apps/desktop/ui/components/Pressable.tsx"],
+      "message": "直接用了 nsh/base 的 Button，按钮文字上会显示 I 形光标",
+      "nextAction": "改用 ui/components/Pressable.tsx 的 Pressable，见 design/components/button.md#鼠标指针"
+    },
+    {
+      "id": "data-dir-default",
+      "include": ["packages/agent/src", "apps/desktop/src", "apps/desktop/ui", "tools", "scripts", "start.sh"],
+      "ext": [".ts", ".tsx", ".mjs", ".js", ".rs", ".sh"],
+      "pattern": "[\"'`/]\\.deepbot[\"'`/]|\\$HOME/\\.deepbot",
+      "owners": ["packages/agent/src/runtime/data-directory.ts", "scripts/install-codex-acp.sh"],
+      "message": "另写了 ~/.deepbot 默认路径，数据会和 DEEPBOT_DATA_DIR 指定的目录分开",
+      "nextAction": "从 runtime/data-directory.ts 的 dataDirectory() 或 DeepBotApp 的派生目录取路径，见 references/features/runtime.md"
+    },
+    {
+      "id": "ts-explicit-any",
+      "include": ["apps/desktop", "packages/agent/src", "packages/agent/test", "packages/agent/tests", "tools/control", "scripts"],
+      "ext": [".ts", ".tsx", ".mts", ".js", ".mjs", ".cjs", ".cts"],
+      "check": "ts-explicit-any",
+      "message": "显式 any 绕开了类型检查",
+      "nextAction": "外部输入先标记 unknown，再用类型守卫解码。已有领域数据使用对应的类型"
+    },
+    {
+      "id": "ts-never-cast",
+      "include": ["apps/desktop", "packages/agent/src", "packages/agent/test", "packages/agent/tests", "tools/control", "scripts"],
+      "ext": [".ts", ".tsx", ".mts", ".cts"],
+      "check": "ts-never-cast",
+      "message": "类型断言跳过了实际数据结构检查",
+      "nextAction": "补齐真实类型。测试坏输入时，把原始值直接传给接收 unknown 的入口"
+    },
+    {
+      "id": "lint-suppression",
+      "include": ["apps/desktop", "packages/agent/src", "packages/agent/test", "packages/agent/tests", "tools/control", "scripts"],
+      "ext": [".ts", ".tsx", ".mts", ".js", ".mjs", ".cjs", ".cts"],
+      "check": "lint-suppression",
+      "message": "源码注释屏蔽了检查",
+      "nextAction": "修调用处或补齐 fixture 类型声明，然后删掉豁免注释"
+    },
+    {
+      "id": "script-lint-suppression",
+      "include": ["scripts", "tools", "start.sh", ".githooks"],
+      "ext": [".sh", ".py", "pre-commit"],
+      "pattern": "^[\\t ]*#[\\t ]*(?:noqa\\b|type:[\\t ]*ignore\\b|shellcheck[\\t ]+disable\\b)|[\\t ]+#[\\t ]*noqa\\b",
+      "message": "脚本注释屏蔽了检查",
+      "nextAction": "按诊断修复脚本，再删掉豁免注释"
+    },
+    {
+      "id": "rust-lint-suppression",
+      "include": ["apps/desktop/src", "apps/desktop/tests"],
+      "ext": [".rs"],
+      "pattern": "^[\\t ]*#\\s*!?\\[[^\\]\\n]*\\b(?:allow|expect)\\s*\\(",
+      "message": "项目的 Rust 源码屏蔽了检查",
+      "nextAction": "调整触发诊断的 Rust 实现。第三方 GTK 补丁随 vendor 版本维护"
+    },
+    {
+      "id": "protocol-cast",
+      "include": ["apps/desktop", "packages/agent/src", "tools/control"],
+      "ext": [".tsx", ".ts", ".mjs", ".mts"],
+      "check": "protocol-cast",
+      "message": "未经解码就把数据断言成协议消息",
+      "nextAction": "在 packages/agent/src/wire.ts 用 decodeHostMessage 或 isAgentMessage 验证协议消息"
+    },
+    {
+      "id": "desktop-agent-modules",
+      "include": ["apps/desktop/App.tsx", "apps/desktop/ui", "packages/agent/src/defaults.ts", "packages/agent/src/protocol.ts", "packages/agent/src/wire.ts", "packages/agent/src/wire-values.ts"],
+      "ext": [".ts", ".tsx"],
+      "check": "desktop-agent-modules",
+      "message": "桌面界面或共享协议引入了后端内部模块",
+      "nextAction": "界面从 state/runtime.ts 发命令和读状态。共享代码放在 protocol、wire、wire-values 或 defaults"
+    },
+    {
+      "id": "desktop-wire-transport",
+      "include": ["apps/desktop/ui"],
+      "owners": ["apps/desktop/ui/state/runtime.ts"],
+      "ext": [".ts", ".tsx"],
+      "check": "desktop-wire-transport",
+      "message": "界面代码越过运行时状态直接调用协议传输",
+      "nextAction": "从 state/runtime.ts 使用 command、requestStatus 或产物读取接口"
+    },
+    {
+      "id": "desktop-network",
+      "include": ["apps/desktop/App.tsx", "apps/desktop/ui"],
+      "ext": [".ts", ".tsx", ".mts", ".js", ".jsx", ".mjs"],
+      "check": "desktop-network",
+      "message": "桌面界面绕过 Agent 直接访问网络",
+      "nextAction": "在 ui/state/runtime.ts 的 command 入口调用共享协议。HTTP 放到 Agent 的 runtime/http.ts"
+    },
+    {
+      "id": "desktop-ui-imports",
+      "include": ["apps/desktop/ui/components", "apps/desktop/ui/features"],
+      "ext": [".ts", ".tsx", ".mts", ".js", ".jsx", ".mjs"],
+      "check": "desktop-ui-imports",
+      "message": "依赖跨过 UI 功能或组件目录边界",
+      "nextAction": "把共享展示提取到 components，业务状态和操作放到 state。需要组合多个功能时使用 AppShell"
+    },
+    {
+      "id": "desktop-base-controls",
+      "include": ["apps/desktop/ui/features"],
+      "ext": [".ts", ".tsx", ".mts", ".js", ".jsx", ".mjs"],
+      "check": "desktop-base-controls",
+      "message": "业务界面直接使用了有项目封装的 nsh/base 控件",
+      "nextAction": "从 ui/components 选用对应的 SelectField、Modal、Switch、TextField 或 SegmentedTabs"
+    },
+    {
+      "id": "nsh-component-props",
+      "include": ["apps/desktop/App.tsx", "apps/desktop/ui"],
+      "ext": [".tsx", ".jsx"],
+      "check": "nsh-component-props",
+      "message": "解构会在组件初始化时读定 props，后续属性更新无法传到该值",
+      "nextAction": "保留 props 参数，在 JSX、computed 或响应式访问器中读取所需属性"
+    },
+    {
+      "id": "desktop-local-json",
+      "include": ["apps/desktop/ui"],
+      "owners": ["apps/desktop/ui/state/local-json.ts"],
+      "ext": [".ts", ".tsx"],
+      "check": "desktop-local-json",
+      "message": "界面另写了本地存储入口",
+      "nextAction": "在 state 层用 local-json.ts 的读写函数，并提供存储格式的类型守卫"
+    },
+    {
+      "id": "agent-private-storage",
+      "include": ["packages/agent/src"],
+      "owners": ["packages/agent/src/storage/session.ts"],
+      "ext": [".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"],
+      "check": "agent-private-storage",
+      "message": "会话存储模块之外直接引用了数据库驱动或存储适配器",
+      "nextAction": "由 storage/session.ts 打开数据库，业务只调用 DeepBotApp 的领域接口"
+    },
+    {
+      "id": "agent-private-ledger",
+      "include": ["packages/agent/src"],
+      "owners": ["packages/agent/src/runtime/app.ts"],
+      "ext": [".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"],
+      "check": "agent-private-ledger",
+      "message": "业务模块直接引用会话存储入口或账本文档",
+      "nextAction": "调用 DeepBotApp 的领域读写接口，按需投影数据"
+    },
+    {
+      "id": "agent-entrypoint-ledger",
+      "include": ["packages/agent/src/main.ts", "packages/agent/src/connectors"],
+      "ext": [".ts", ".mts"],
+      "check": "agent-entrypoint-ledger",
+      "message": "协议入口或连接器读取了完整账本或 Pi 会话对象",
+      "nextAction": "用 DeepBotApp 的权限、活跃派工、序号等查询接口，或为调用方补一个窄查询"
+    },
+    {
+      "id": "agent-http",
+      "include": ["packages/agent/src"],
+      "owners": ["packages/agent/src/runtime/http.ts"],
+      "ext": [".ts", ".mts"],
+      "check": "agent-http",
+      "message": "业务模块直接调用 fetch，缺少统一的超时和重定向处理",
+      "nextAction": "改用 runtime/http.ts 的 requestHttp 和带上限的 readHttpText"
+    },
+    {
+      "id": "connector-child-process",
+      "include": ["packages/agent/src/connectors"],
+      "owners": ["packages/agent/src/connectors/support.ts"],
+      "ext": [".ts", ".mts"],
+      "check": "connector-child-process",
+      "message": "连接器自行启动进程，可能把父进程环境传给外部工具",
+      "nextAction": "使用 connectors/support.ts 的 startConnectorProcess，需要的环境变量在连接器配置里显式传入"
+    },
+    {
+      "id": "connector-config-write",
+      "include": ["packages/agent/src/connectors", "packages/agent/src/runtime/model-config.ts"],
+      "ext": [".ts", ".mts"],
+      "check": "connector-config-write",
+      "message": "连接器或模型配置使用了直接写文件的入口",
+      "nextAction": "用 runtime/private-json.ts 的 writePrivateJson 写私有配置和派工记录"
+    },
+    {
+      "id": "bot-library-write",
+      "include": ["packages/agent/src/bot", "packages/agent/src/connectors"],
+      "ext": [".ts", ".mts"],
+      "check": "bot-library-write",
+      "message": "工具或连接器直接改写了记忆或例行集合",
+      "nextAction": "在事务里调用 DeepBotApp 的 saveMemory、forgetMemory 或 saveRoutine"
+    },
+    {
+      "id": "verify-model-snapshot",
+      "include": ["tools/control/worker.mjs"],
+      "ext": [".mjs"],
+      "check": "verify-model-snapshot",
+      "message": "界面场景读取了 Agent 的私有配置",
+      "nextAction": "从同一实例的公开 snapshot 断言状态。原生模型投影由 native-peer.mjs 采集"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "description": "从侧栏加号创建新 Bot，选形状和颜色，创建后侧栏和聊天头部切到新 Bot",
+  "design": ["DESIGN.md", "design/sidebar.md", "design/components/dialog.md", "design/components/avatar.md"],
+  "steps": [
+    {"wait": "id:sidebar-create"},
+    {"press": "id:sidebar-create"},
+    {"wait": "id:create-bot"},
+    {"type": ["id:create-bot-name", "验证助手"]},
+    {"press": "label:形状 六角"},
+    {"press": "label:蓝色"},
+    {"screenshot": "01-create-dialog"},
+    {"press": "id:create-bot-submit"},
+    {"gone": "id:create-bot"},
+    {"wait": "label:查看 验证助手 的信息"},
+    {"wait": "text:开始聊天，或把一件事交给 Bot"},
+    {"screenshot": "02-bot-created"}
+  ]
+}

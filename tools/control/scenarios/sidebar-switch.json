@@ -1,0 +1,15 @@
+{
+  "description": "侧栏有两个 Bot 时点击切换：先创建「验证助手」，再点回置顶的小菜，头部胶囊和输入框占位跟着变",
+  "design": ["DESIGN.md", "design/sidebar.md"],
+  "steps": [
+    {"wait": "id:sidebar-create"},
+    {"press": "id:sidebar-create"},
+    {"type": ["id:create-bot-name", "验证助手"]},
+    {"press": "id:create-bot-submit"},
+    {"gone": "id:create-bot"},
+    {"wait": "label:查看 验证助手 的信息"},
+    {"press": "id:bot-xiaocai"},
+    {"wait": "label:查看 小菜 的信息"},
+    {"screenshot": "01-switched"}
+  ]
+}

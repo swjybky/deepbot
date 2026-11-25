@@ -1,0 +1,16 @@
+{
+  "description": "从原生侧栏的右键菜单打开重命名表单并用回车保存",
+  "design": ["DESIGN.md", "design/sidebar.md", "design/components/dialog.md"],
+  "steps": [
+    {"wait": "id:bot-xiaocai"},
+    {"rightClick": "id:bot-xiaocai"},
+    {"chooseMenuItem": "重命名 Bot"},
+    {"wait": "id:rename-bot-name"},
+    {"screenshot": "02-context-rename"},
+    {"clear": "id:rename-bot-name"},
+    {"type": ["id:rename-bot-name", "侧栏验证小菜"]},
+    {"submit": "id:rename-bot-name"},
+    {"gone": "id:rename-bot-name"},
+    {"wait": "label:查看 侧栏验证小菜 的信息"}
+  ]
+}

@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DeepBot 整体设计：会管活、也会干活的 IM Bots</title>
+<style>
+:root{--ink:#182638;--muted:#586778;--line:#dce4eb;--blue:#185a9d;--soft:#f1f6fa;--green:#107466;--amber:#8a5a00}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:#f3f6f9;color:var(--ink);font:16px/1.85 system-ui,-apple-system,"Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+main{max-width:1120px;margin:28px auto;background:white;padding:44px 58px;border:1px solid var(--line);border-radius:14px}
+header{border-bottom:3px solid var(--blue);padding-bottom:24px}
+h1{font-size:32px;line-height:1.4;margin:8px 0 18px}
+h2{font-size:24px;margin:40px 0 15px;border-bottom:1px solid var(--line);padding-bottom:8px}
+h3{font-size:19px;margin:24px 0 10px}
+p{margin:12px 0}
+a{color:var(--blue);overflow-wrap:anywhere}
+code{background:var(--soft);border-radius:4px;padding:2px 5px;font:0.87em ui-monospace,monospace;overflow-wrap:anywhere}
+pre{background:#f3f6f9;border:1px solid var(--line);border-radius:8px;padding:18px;overflow:auto;line-height:1.65;font-size:13px}
+pre code{background:none;padding:0;font-size:inherit}
+code.nb{white-space:nowrap}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:18px 0}
+th,td{text-align:left;vertical-align:top;border:1px solid var(--line);padding:10px 12px}
+th{background:var(--soft)}
+ul,ol{padding-left:25px}
+li{margin:7px 0}
+.kicker{font-weight:700;color:var(--blue);font-size:13px;letter-spacing:.12em}
+.meta,.evidence{font-size:13px;color:var(--muted)}
+.callout{padding:18px 22px;background:#eef6fc;border-left:4px solid var(--blue);margin:20px 0}
+.proposal{background:#eff8f5;border-left-color:var(--green)}
+.tag{display:inline-block;padding:2px 9px;font-size:12px;border-radius:5px;background:#e7f1fb;color:var(--blue);margin-right:6px;white-space:nowrap}
+.tag.design{background:#e6f4ef;color:var(--green)}
+.tag.open{background:#fbf0dc;color:var(--amber)}
+.partno{display:inline-block;background:var(--blue);color:#fff;font-size:13px;font-weight:700;letter-spacing:.08em;padding:3px 12px;border-radius:5px;margin-right:12px;vertical-align:3px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.grid.two{grid-template-columns:repeat(2,1fr)}
+.grid.four{grid-template-columns:repeat(4,1fr)}
+.node{border:1px solid #bfd0df;background:var(--soft);border-radius:8px;padding:16px;text-align:center}
+.node strong{display:block}
+.node.self{border-color:#8fc6b8;background:#eff8f5}
+.arrow{text-align:center;color:var(--blue);font-size:24px;line-height:1.5}
+.arrow.label{font-size:13px;line-height:2.4;font-weight:600}
+.diagram{margin:18px 0;padding:20px;border:1px solid var(--line);border-radius:8px}
+.rail{border:1px solid #9cb6cd;background:#eaf3fa;padding:16px;text-align:center;border-radius:8px}
+.rail.bot{background:var(--blue);border-color:var(--blue);color:#fff}
+.rail.bot .small{color:#dbe9f6}
+.flow{display:grid;grid-template-columns:1fr auto 1.25fr auto 1fr;gap:10px;align-items:center}
+.flow .node{text-align:left;font-size:14px}
+.flow .node.hot{border-color:var(--blue);background:#eaf3fa}
+.card{border:1px solid var(--line);border-radius:10px;padding:18px 24px}
+.card h3{margin:0 0 8px}
+.card ul{margin:0}
+.small{font-size:13px}
+.who{font-weight:700;margin-right:6px}
+.who.me{color:var(--muted)}
+.who.bot{color:var(--blue)}
+.wcard{display:inline-block;border:1px solid #bfd0df;border-radius:7px;padding:1px 10px;font-size:12.5px;background:var(--soft);margin-top:4px}
+.quiet{color:var(--muted)}
+.toc{columns:2;column-gap:36px}
+.toc a{display:block;padding:4px 0;text-decoration:none}
+footer{margin-top:40px;border-top:1px solid var(--line);padding-top:15px;color:var(--muted);font-size:13px}
+@media(max-width:750px){body{background:white}main{padding:20px 17px;margin:0;border:0}h1{font-size:26px}.grid,.grid.two,.grid.four{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.flow .arrow{transform:rotate(90deg)}.toc{columns:1}table{display:block;overflow:auto}h2{font-size:22px}}
+@media print{body{background:white;font-size:11pt}main{max-width:none;border:0;margin:0;padding:0}a{color:inherit;text-decoration:none}h2,h3{break-after:avoid}tr,.node,.card{break-inside:avoid}.toc{display:none}pre{white-space:pre-wrap}table{font-size:9pt}.diagram{break-inside:avoid}.rail.bot{color:#000;background:#eaf3fa}}
+</style>
+</head>
+<body>
+<main>
+
+<header>
+<div class="kicker">BOT 架构 · 03 · 整体设计（承接 01、02）</div>
+<h1>DeepBot 整体设计：会管活、也会干活的 IM Bots</h1>
+<p>把 OpenBot 的「持久 Bot」和 DSH 的「授权任务」合成一个结构：你只跟 Bot 说话，Bot 对每件事负责到底；活可以它自己干，也可以派给 Hermes Agent、T3 Code 或真人。全文分两部分：最小 MVP（个人 Bot）和未来扩展（群聊）。</p>
+<p class="meta">设计日期：2026-11-10<br>
+依据：<a href="01-openbot-research-zh.html">报告 01（OpenBot）</a>、<a href="02-dsh-superagent-research-zh.html">报告 02（DSH Superagent）</a>；本地代码 <code>packages/agent</code>、<code>apps/desktop</code>；Pi Durable 1.5.0 README；T3 Code、Hermes Agent、ACP、Claude Agent SDK 的公开文档（2026-11-10 读取）</p>
+</header>
+
+<div class="callout"><strong>核心判断：</strong>Bot 是负责人，执行者是干活的路径。会话、事项、执行分三层：会话层是 IM，随时说、随时回；事项层是 Bot 的账本，记着接了什么、派给谁、卡在哪；执行层是可替换的执行者，可以是 Bot 自己、外部智能体或真人。Bot 的前台永远腾得出手回话，成块的活全部在后台跑。</div>
+
+<p class="meta">标记：<span class="tag">已核验</span>在本地代码或对方官方文档里确认过；<span class="tag design">设计</span>本文提出的方案；<span class="tag open">待定</span>需要你拍板。外部产品没有实际安装、连接做端到端验证；Pi Durable 的用法依据它的 README，还没有写代码验证。本次没有改动任何应用代码。</p>
+
+<div class="grid two">
+<div class="card"><h3><span class="partno">第一部分</span>最小 MVP：个人 Bot</h3><ul>
+<li>一个人、桌面端、多个 Bot，各有一条常驻单聊</li>
+<li>IM 语义：随时发、连发合并、回 0 到多条、Bot 主动汇报</li>
+<li>事项账本，会话里有事项卡片和提问卡片</li>
+<li>执行者端口，先接三个：自己干、T3 Code、你本人</li>
+<li>点名与规矩路由、中途改派、权限闸、重启续跑</li>
+</ul><p class="small"><a href="#mvp">→ 第 8 节</a></p></div>
+<div class="card"><h3><span class="partno">第二部分</span>未来扩展：群聊</h3><ul>
+<li>会话成员变多：多个人、多个 Bot</li>
+<li>被 @、被回复、被引用才唤醒，不广播</li>
+<li>一事一主；别的 Bot 也是一种执行者</li>
+<li>授权（谁提的、能做到哪一步）与群记忆隔离</li>
+<li>外部 IM（飞书等）接入，后台常在线</li>
+</ul><p class="small"><a href="#group">→ 第 9 节</a></p></div>
+</div>
+
+<nav class="toc">
+<a href="#understand">1. 我对需求的理解</a>
+<a href="#decisions">2. 三个核心决定</a>
+<a href="#architecture">3. 总体架构</a>
+<a href="#im">4. IM 语义：为什么不是一问一答</a>
+<a href="#objects">5. 核心对象</a>
+<a href="#loop">6. Bot 怎么运转：派、盯、挡、验</a>
+<a href="#executors">7. 执行者端口</a>
+<a href="#mvp">8. 第一部分：最小 MVP（个人 Bot）</a>
+<a href="#group">9. 第二部分：未来扩展（群聊）</a>
+<a href="#invariants">10. 从第一天就守住的不变量</a>
+<a href="#open">11. 风险与待你拍板</a>
+<a href="#sources">12. 依据与边界</a>
+</nav>
+
+<section id="understand"><h2>1. 我对需求的理解</h2>
+<p>你的原话是语音转写的，有几处我按上下文还原了：「ARM 通信」读作 IM 通信；「不像 DeepSeek」读作不像 DSH Superagent；「human agent」有两种读法，Hermes Agent 这类外部智能体，或者真人。两种读法在这份设计里都是执行者，结构上不冲突，所以都覆盖了。</p>
+<table><thead><tr><th style="width:34%">你说的</th><th>设计上的含义</th></tr></thead><tbody>
+<tr><td>基于 IM 通信，不是一问一答</td><td>消息和回复解耦：你随时发，Bot 可以回 0 到多条，也可以在没人问的时候主动汇报。见 <a href="#im">第 4 节</a>。</td></tr>
+<tr><td>不像 DSH 只管理会话，还能管理别的智能体</td><td>DSH 的主会话只做路由，干活的只有它自家的 Session。DeepBot 把「干活的路径」抽象成执行者端口，Hermes Agent、T3 Code、真人都是它的实现。见 <a href="#executors">第 7 节</a>。</td></tr>
+<tr><td>Bot 是管活的，也可以实际去干活</td><td>「自己干」是默认执行者，和外部执行者走同一套派工流程，区别只是活跑在 Bot 自己的后台会话里。见 <a href="#decisions">第 2 节</a>、<a href="#loop">第 6 节</a>。</td></tr>
+<tr><td>有些动作，用户会要求走别的路径</td><td>路由有优先级：你这次点名 &gt; 你立过的规矩 &gt; Bot 判断 &gt; 自己干。干到一半也能改派，事项不变。见 <a href="#routing">7.4</a>。</td></tr>
+<tr><td>先个人，后群聊</td><td>单聊按「两个成员的群」建模，消息存作者、不存角色。到群聊时，别的 Bot 只是又一种执行者。见 <a href="#group">第 9 节</a>、<a href="#invariants">第 10 节</a>。</td></tr>
+</tbody></table></section>
+
+<section id="decisions"><h2>2. 三个核心决定</h2>
+<h3>决定一：会话、事项、执行分三层</h3>
+<p><span class="tag design">设计</span>会话层只管谁说了什么。事项层是 Bot 的账本，记录接了哪些活、各自派给谁、卡在哪。执行层是可替换的执行者。三层各有自己的状态，互不冒充：模型回了一句话不等于事办完了，执行者说完成了也不等于 Bot 已经验收。</p>
+<h3>决定二：Bot 的前台永远腾得出手</h3>
+<p><span class="tag design">设计</span>每个 Bot 在每个会话里有一条前台线，只做管理和顺手的小事，有轮数预算。成块的活一律放到后台线去跑，包括 Bot 自己干的。后台跑着三件事的时候，你发一句话，Bot 仍然马上能接。</p>
+<h3>决定三：所有干活路径实现同一个执行者端口</h3>
+<p><span class="tag design">设计</span>派工、收汇报、验收、改派这套管理逻辑只写一遍，不随执行者分叉。新接一种智能体，就是写一个适配器，再声明它有哪些能力。</p>
+<table><thead><tr><th style="width:26%">方案</th><th>结果</th></tr></thead><tbody>
+<tr><td>单会话全包<br><span class="small quiet">当前 <code>main.ts</code> 的形态</span></td><td>否掉。长活期间会话被占住，不能并行，也换不了执行者。</td></tr>
+<tr><td>纯调度员<br><span class="small quiet">DSH 的 Router</span></td><td>否掉。Bot 自己不干活，小事也要派工，慢，而且不符合「我也可以实际去干活」。</td></tr>
+<tr><td><strong>前台、后台分线，自己干是默认执行者</strong></td><td>采用。小事前台顺手做掉，成块的活后台跑，管理逻辑对所有执行者统一。</td></tr>
+</tbody></table></section>
+
+<section id="architecture"><h2>3. 总体架构</h2>
+<div class="diagram" role="img" aria-label="DeepBot 总体架构：入口、入账、Bot 前台、事项账本、执行者、存储">
+<div class="grid">
+<div class="node"><strong>桌面单聊</strong>第一部分 · MVP</div>
+<div class="node"><strong>群聊与外部 IM</strong>第二部分 · 扩展</div>
+<div class="node"><strong>例行与外部事件</strong>定时、Webhook</div>
+</div>
+<div class="arrow">↓</div>
+<div class="rail"><strong>入账</strong> · 幂等落库 → 立即显示 → 合并连发 → 归属（挂到哪件事、唤醒谁）</div>
+<div class="arrow">↓</div>
+<div class="rail bot"><strong>Bot 前台</strong>（每个 Bot × 会话一条，永远短）<br><span class="small">回话 · 提问 · 开事项 · 派活 · 验收 · 顺手的小事</span></div>
+<div class="arrow label">↓ 开事项、派工　　　↑ 汇报唤醒</div>
+<div class="rail"><strong>事项账本</strong> · 事项 / 派工 / 汇报 / 提问 · 路由规则 · 权限闸<br><span class="small">状态变更和派工在同一次提交里；副作用在提交之后由可恢复任务执行</span></div>
+<div class="arrow label">↓ 派工单　　　↑ 进度、提问、完成、受阻</div>
+<div class="grid four">
+<div class="node self"><strong>自己干</strong>Bot 的后台会话<br>默认执行者</div>
+<div class="node"><strong>外部智能体</strong>ACP：Hermes Agent 等</div>
+<div class="node"><strong>T3 Code</strong>本机 CLI 或 MCP 端点</div>
+<div class="node"><strong>真人</strong>你本人；群聊时是成员</div>
+</div>
+<div class="arrow">↕</div>
+<div class="rail"><strong>Pi Durable（SQLite）</strong> · 会话记录 · 类型化文档 · 可恢复任务　｜　产物目录　｜　记忆</div>
+</div>
+<p>界面只读投影：桌面端不直接改任何执行状态，它发命令、收事件。这一点沿用了报告 01 里「本地主机是执行权威、客户端是投影」的结论。</p>
+<table><thead><tr><th style="width:13%">维度</th><th>取自 OpenBot</th><th>取自 DSH</th><th>DeepBot 新增</th></tr></thead><tbody>
+<tr><td>身份</td><td>持久 Bot，身份与模型会话分离</td><td></td><td>Bot 同时是负责人和默认执行者</td></tr>
+<tr><td>工作单位</td><td></td><td>Ticket、Assignment、结构化汇报</td><td>负责人固定，执行者可换</td></tr>
+<tr><td>谁干活</td><td>Provider 适配器换的是 Bot 的模型后端；Bot 之间用消息协作</td><td>有 Executor 端口，唯一实现是 DSH Session</td><td>异构执行者：自己、外部智能体、真人、其他 Bot，同一个端口</td></tr>
+<tr><td>消息流</td><td>持久信箱，按线串行</td><td>新请求走路由，后续讨论按订阅直达</td><td>单聊里由 Bot 前台自己做归属；群聊再加确定性的 Gate</td></tr>
+<tr><td>可靠性</td><td>幂等入队</td><td>先提交状态，再跑副作用</td><td>直接用 Pi Durable 的「提交 + 可恢复任务」实现，MVP 不另造信箱表</td></tr>
+<tr><td>记忆</td><td>essential / searchable 分层，成功才提交</td><td>任务台账</td><td>MVP 只做台账、essential 和路由规则</td></tr>
+</tbody></table></section>
+
+<section id="im"><h2>4. IM 语义：为什么不是一问一答</h2>
+<table><thead><tr><th style="width:14%"></th><th style="width:30%">一问一答</th><th>DeepBot</th></tr></thead><tbody>
+<tr><td>发消息</td><td>Bot 回完才能发下一条</td><td>随时发。消息先入账、立即显示，再决定要不要唤醒 Bot</td></tr>
+<tr><td>连发几条</td><td>每条各触发一次回答</td><td>合并成一次唤醒。Bot 已经在动手时，新消息在下一个工具回合插进去</td></tr>
+<tr><td>回复数量</td><td>恰好一条</td><td>0 到多条：可以只点个表情，可以先回执、后交付</td></tr>
+<tr><td>谁能开口</td><td>只有用户消息能触发</td><td>执行者汇报、定时、外部事件都能让 Bot 主动说话</td></tr>
+<tr><td>同时几件事</td><td>一件，按顺序</td><td>多件并行。引用哪条，就是在对哪件事说话</td></tr>
+<tr><td>进度</td><td>刷在回答里</td><td>留在事项卡片上原地更新。消息只用于四种情况：回执、要你决定、交付、干不下去</td></tr>
+<tr><td>状态</td><td>一个 busy 真假</td><td>每件事各自的阶段：排队、执行中、等你、验收中、已交付</td></tr>
+</tbody></table>
+
+<h3>4.1 一段对话长什么样</h3>
+<p class="evidence">示意，不是运行记录。</p>
+<table><thead><tr><th style="width:8%">时间</th><th style="width:44%">会话里看到的</th><th>背后发生的</th></tr></thead><tbody>
+<tr><td>10:02</td><td><span class="who me">我</span>帮 deepbot 的 README 补一节「执行者」说明<br><span class="who me">我</span>用 T3 Code 做，开个新分支</td><td>两条合并成一次唤醒。你点名了执行者，Bot 照办：开事项 #12，写派工单，派给 T3 Code。</td></tr>
+<tr><td>10:02</td><td><span class="who bot">Bot</span>收到，已交给 T3 Code，分支 docs/executors。<br><span class="wcard">#12 补 README「执行者」一节 · T3 Code · 执行中</span></td><td>派工是后台任务。Bot 前台这一轮到此结束，重新空闲。</td></tr>
+<tr><td>10:03</td><td><span class="who me">我</span>顺便把刚才那张截图存到「图片」文件夹<br><span class="who bot">Bot</span>存好了。</td><td>另一件事，而且是顺手的小事：Bot 在前台自己做完，不开事项。#12 不受影响。</td></tr>
+<tr><td>10:05</td><td><span class="who me">我</span><span class="quiet">（回复卡片 #12）</span>记得中英文都写<br><span class="who bot">Bot</span>👀</td><td>引用卡片就是对这件事说话。Bot 把补充转给 T3 Code，成为它的下一轮；自己只回一个表情。</td></tr>
+<tr><td>10:09</td><td><span class="quiet">没有新消息，卡片上的进度在变</span></td><td>T3 Code 这一轮结束时问「要不要覆盖已有小节」。你说的是「补一节」，Bot 自己能答，直接回给执行者，不打扰你。</td></tr>
+<tr><td>10:14</td><td><span class="who bot">Bot</span>README 补好了：新增「执行者」一节，中英文各一段，在分支 docs/executors。要我提 PR 吗？<br><span class="wcard">#12 · 已交付</span></td><td>T3 Code 汇报完成。Bot 先验收（读改动，核对中英文都在），再用自己的话交付，并问下一步。</td></tr>
+<tr><td>次日 09:00</td><td><span class="who bot">Bot</span>早上的 GitHub 汇总：……</td><td>例行到点。没有人问，Bot 主动开口。</td></tr>
+</tbody></table>
+
+<h3>4.2 输出契约：Bot 怎么「说话」</h3>
+<p><span class="tag design">设计</span>一问一答的系统里，模型的最终文本就是回复。这里把「说话」变成 Bot 的一个明确动作：</p>
+<ul>
+<li><strong>最终回答文本</strong>：发成一条消息；为空就不发。</li>
+<li><code>say</code>：中途就发一条，用于回执和分段交付。</li>
+<li><code>ask</code>：发一张提问卡片，要你做决定、批准或动手；对应的事项进入「等你」。</li>
+<li><code>pass</code>：这一轮不说话，比如只是收到了一条它自己能处理的汇报。</li>
+<li>表情回执：表示看到了，不占一条消息。</li>
+<li>工具调用之间的自言自语不外发，只进工作日志。</li>
+</ul>
+<p>连发合并的实现先做两样：短窗口防抖（起步值一两秒，可调），以及忙时插话。「Bot 还没动手就重想」留作后续优化。</p></section>
+
+<section id="objects"><h2>5. 核心对象</h2>
+<p><span class="tag design">设计</span>「事项」对应报告 02 的 Ticket / Task。现有界面右栏「即将进行」里的定时项，这里叫「例行」，它只是一种触发器，每次触发开一个事项。</p>
+<table><thead><tr><th style="width:17%">对象</th><th style="width:25%">是什么</th><th>关键字段与不变量</th></tr></thead><tbody>
+<tr><td>Bot</td><td>常驻联系人，也是负责人</td><td>botId、人设指令、模型、工作目录、权限开关、可用执行者、路由规则。身份不绑定进程，也不绑定某个模型会话。</td></tr>
+<tr><td>会话 Thread</td><td>单聊或群</td><td>threadId、kind（dm / group）、members（人或 Bot）。单聊就是两个成员的会话。</td></tr>
+<tr><td>消息 Message</td><td>会话里的一条</td><td>messageId、author（person / bot / system）、kind（text / ask / result / notice）、replyTo、workId、requestId。存作者，不存 user / assistant 角色。</td></tr>
+<tr><td>事项 Work</td><td>一件被接下的活</td><td>workId、ownerBotId、threadId、目标、验收标准、范围、state、revision。负责人唯一，不随改派变。</td></tr>
+<tr><td>派工 Assignment</td><td>事项的一次执行绑定</td><td>assignmentId（幂等键）、executorId、sessionRef、派工单、state、attempt。一件事可以有多次派工。</td></tr>
+<tr><td>执行者 Executor</td><td>干活的路径</td><td>executorId、kind（self / harness / human / bot）、能力声明、所在电脑、是否可用。</td></tr>
+<tr><td>汇报 Report</td><td>执行者 → Bot</td><td>kind（progress / question / permission / artifact / ready / blocked / failed）、证据引用。结构化，不靠猜文字。</td></tr>
+<tr><td>提问 Attention</td><td>Bot → 人，要一个决定</td><td>attentionId、workId、问题、选项、kind（决定 / 批准 / 要你动手）、答复。一次性，答过即失效。</td></tr>
+<tr><td>路由规则 RouteRule</td><td>什么动作走哪条路</td><td>match（动作类别、目录、关键词）、executorId、是否先问、来源消息、enabled。</td></tr>
+<tr><td>例行 Routine</td><td>定时触发器</td><td>计划、提示、enabled。每次触发开一个事项。</td></tr>
+<tr><td>记忆与产物</td><td>长期事实；文件、链接、改动</td><td>记忆带证据引用和 revision。产物带 hash，消息只引用它；它就是右栏的「资料库」。</td></tr>
+</tbody></table></section>
+
+<section id="loop"><h2>6. Bot 怎么运转：派、盯、挡、验</h2>
+<div class="flow" role="img" aria-label="Bot 前台的一轮：唤醒源、处理、产出">
+<div class="node"><strong>唤醒源</strong>人的消息（合并后）<br>执行者汇报<br>定时与例行<br>系统事件（重启恢复）</div>
+<div class="arrow">→</div>
+<div class="node hot"><strong>Bot 前台的一轮</strong>读：本批事件、事项看板、记忆<br>判：哪件事？谁来干？要不要说话？<br>做：管理工具和顺手的小工具</div>
+<div class="arrow">→</div>
+<div class="node"><strong>产出</strong>0 到多条消息<br>账本变更（开、派、改派、关）<br>后台派工任务</div>
+</div>
+<p><span class="tag design">设计</span>每次唤醒都附带一份看板：每件未结束的事一行，写着编号、标题、执行者、阶段、最后一次汇报、在等谁。详情按指针分页读，不整段塞进上下文。看板随事件一起给，不放进系统提示词，免得每次变化都冲掉提示缓存。</p>
+
+<h3>6.1 管理者的四件事</h3>
+<table><thead><tr><th style="width:8%"></th><th>做什么</th></tr></thead><tbody>
+<tr><td><strong>派</strong></td><td>把活写成派工单：目标、背景（引用消息和文件，不贴整段聊天）、范围与禁区、验收标准。选好执行者，在一次提交里同时记账和创建派工。</td></tr>
+<tr><td><strong>盯</strong></td><td>进度只更新卡片，不唤醒 Bot，也不发消息。只有提问、请求批准、完成、受阻、失败才唤醒 Bot。</td></tr>
+<tr><td><strong>挡</strong></td><td>执行者的问题先到 Bot。凭会话和记忆能答的，Bot 直接答；涉及授权、花钱、对外发布，或者它确实不知道的，才变成给你的提问卡片。</td></tr>
+<tr><td><strong>验</strong></td><td>执行者说「完成」只是一条汇报。Bot 按验收标准核对证据：文件在不在、命令输出是什么、链接能不能开。通过才交付；不通过就退回，退回次数有上限，超了如实告诉你。</td></tr>
+</tbody></table>
+
+<h3>6.2 一条消息归到哪件事</h3>
+<ol>
+<li>引用或回复了某张事项卡片，或某条挂着事项的消息：归那件事。这一步是确定性的，不问模型。</li>
+<li>正好有一个提问在等你，而这条消息在回答它：归那件事。</li>
+<li>其余交给 Bot 前台判断：直接回答、顺手做掉、开新事项，或者并入已有的事。</li>
+</ol>
+<p>能确定的不让模型猜，只有新话题才需要判断。</p>
+
+<h3>6.3 三层状态</h3>
+<table><thead><tr><th style="width:22%">状态层</th><th style="width:40%">取值</th><th>表达什么</th></tr></thead><tbody>
+<tr><td>事项</td><td>open → ended（done / failed / cancelled）；回复结果可以重新打开</td><td>这件事还在不在</td></tr>
+<tr><td>派工</td><td>pending → running → ended（completed / failed / cancelled / interrupted）</td><td>这一次执行绑定的寿命</td></tr>
+<tr><td>给人看的阶段（派生）</td><td>排队、执行中、等你、验收中、已交付、失败、已取消</td><td>此刻在等谁、为什么没往前走</td></tr>
+</tbody></table>
+
+<h3>6.4 前台预算与并发</h3>
+<p><span class="tag design">设计</span>前台一轮的工具回合数有上限（起步值，可调）。到了上限还没做完，说明它不是小事，必须开事项转到后台。后台同时跑的派工也有上限，人的消息永远优先于新派工。</p></section>
+
+<section id="executors"><h2>7. 执行者端口</h2>
+<h3>7.1 接口</h3>
+<pre><code>interface Executor {
+  id: string;            // "self" · "t3code" · "acp:hermes" · "human:me" · "bot:&lt;id&gt;"
+  capabilities: { steer, cancel, reattach, permissionRelay, stream };
+
+  start(a: { assignmentId, brief, cwd?, attachments? }): Promise&lt;SessionRef&gt;;  // 以 assignmentId 幂等
+  send(s: SessionRef, input: { inputId, text }): Promise&lt;void&gt;;                // 补充或回答，以 inputId 幂等
+  cancel(s: SessionRef, reason: string): Promise&lt;void&gt;;
+  reattach(s: SessionRef): Promise&lt;"alive" | "lost"&gt;;                          // 重启之后
+  events(s: SessionRef, cursor?): AsyncIterable&lt;Report&gt;;                       // 归一化成七种汇报
+}</code></pre>
+
+<h3>7.2 第一批执行者</h3>
+<table><thead><tr><th style="width:15%">执行者</th><th>怎么接 <span class="tag">已核验</span></th><th style="width:27%">适合的活</th></tr></thead><tbody>
+<tr><td><strong>自己干</strong></td><td>Pi Durable 里由后台任务持有的子会话，沿用 Bot 的人设和记忆，带全套工作工具。README 示例 22 就是这个模式：后台子代理，回报任务把结果投回父会话。</td><td>跨工具的杂事、要用到 Bot 记忆的事、几分钟内能做完的事</td></tr>
+<tr><td><strong>T3 Code</strong></td><td>本机 CLI，在宿主机上运行不需要登录：<code>t3 thread start &lt;project&gt; "&lt;message&gt;"</code>（<code class="nb">--worktree</code>、<code class="nb">--json</code>）、<code>t3 thread send &lt;id&gt; "&lt;message&gt;"</code>（<code class="nb">--wait</code>）、<code class="nb">t3 thread show</code>、<code class="nb">t3 thread list</code>。远程环境走它的 MCP 端点 <code class="nb">https://&lt;环境地址&gt;/mcp</code>：OAuth 登录，一次有效 30 天，新接入默认只读，Supervised 及以上才能开线程、发消息、停止。</td><td>代码仓库里的改动。背后是 Codex、Claude Code、Cursor、OpenCode 等，diff、检查点、审批界面都是现成的</td></tr>
+<tr><td><strong>ACP 类</strong><br><span class="small quiet">Hermes Agent 等</span></td><td>子进程上的 JSON-RPC：<code>initialize</code> → <code>session/new</code> → <code>session/prompt</code>，进度经 <code>session/update</code> 流回，<code>session/cancel</code> 取消，对方要权限时调用 <code>session/request_permission</code>。Hermes 的入口是 <code class="nb">hermes acp</code>。</td><td>长时间调研、对方已有技能的事。一个适配器覆盖所有支持 ACP 的智能体</td></tr>
+<tr><td><strong>原生 SDK 类</strong><br><span class="small quiet">可选</span></td><td>例如 <code>@anthropic-ai/claude-agent-sdk</code>：<code>query()</code> 的 prompt 可以是异步流，支持 <code>interrupt()</code>、<code>resume</code>、<code>canUseTool</code>。</td><td>需要比 ACP 更细的控制时</td></tr>
+<tr><td><strong>真人</strong></td><td>一张待办或提问卡片，加上等待。MVP 里这个人就是你。</td><td>机器做不了或不该做的动作：登录、付款、最终确认</td></tr>
+</tbody></table>
+<p class="evidence">Hermes 还有另一条路：它自己常驻时，可以用 <code>hermes peer run &lt;peer&gt; --idempotency-key &lt;key&gt;</code> 异步发起，再用 <code>hermes peer status</code>、<code>hermes peer stop</code> 查询和停止。这条路的会话不随 DeepBot 进程退出而消失。</p>
+
+<table><thead><tr><th style="width:15%">能力</th><th>自己干</th><th>T3 Code（CLI）</th><th>ACP 类</th><th>真人</th></tr></thead><tbody>
+<tr><td>运行中插话</td><td>可以（steer）</td><td>成为下一轮，不打断 <span class="tag">已核验</span></td><td>作为下一轮；要立刻改方向就先取消 <span class="tag design">设计</span></td><td>再发一条</td></tr>
+<tr><td>取消</td><td>可以</td><td>CLI 文档没写；MCP 端点可以停止</td><td><code>session/cancel</code></td><td>撤回待办</td></tr>
+<tr><td>重启后接回</td><td>Pi Durable 续跑</td><td>线程在 T3 Code 里，按 id 读</td><td>取决于对方是否支持 <code>session/load</code></td><td>待办在账本里</td></tr>
+<tr><td>审批转发</td><td>钩子拦截</td><td>不能。在 T3 Code 里回答，CLI 以退出码 2 表示它在等</td><td><code>session/request_permission</code></td><td>人自己负责</td></tr>
+<tr><td>实时进度</td><td>有</td><td>轮询 <code class="nb">t3 thread show</code></td><td><code>session/update</code></td><td>没有</td></tr>
+<tr><td>进程归属</td><td>DeepBot 进程内</td><td>T3 Code 自己的服务</td><td>DeepBot 的子进程</td><td></td></tr>
+</tbody></table>
+
+<h3>7.3 能力不齐时怎么降级</h3>
+<table><thead><tr><th style="width:24%">执行者缺的能力</th><th>Bot 怎么处理</th></tr></thead><tbody>
+<tr><td>不能运行中插话</td><td>补充先记在事项上，等这一轮结束再发。你说「马上改」，就取消重派。</td></tr>
+<tr><td>不能取消</td><td>事项标成「已放弃，等对方收尾」，并告诉你去对方界面停。</td></tr>
+<tr><td>重启后接不回</td><td>这次派工记为中断。开一次新派工，附交接包（已完成的步骤、产物、未决问题），并要求先核对现场再继续。</td></tr>
+<tr><td>不能转发审批</td><td>审批发生在对方界面，卡片显示「等你 · 去 T3 Code 确认」。这类执行者只接你点名的活，或规则明确放行的活。</td></tr>
+<tr><td>没有实时进度</td><td>卡片只显示阶段和最后一次汇报。</td></tr>
+</tbody></table>
+
+<h3 id="routing">7.4 谁来干：路由</h3>
+<p><span class="tag design">设计</span>优先级从高到低：</p>
+<ol>
+<li><strong>你这次点名。</strong>「用 T3 Code 做」「你自己来」「这个我自己弄」。</li>
+<li><strong>你立过的规矩。</strong>例如：改代码仓库 → T3 Code；长时间调研 → Hermes Agent；对外发布 → 先问我。</li>
+<li><strong>Bot 判断。</strong>按各执行者的能力说明和以往的结果选。</li>
+<li><strong>兜底：自己干。</strong></li>
+</ol>
+<ul>
+<li><strong>规矩怎么来。</strong>在设置里手写，或者在聊天里说一次「以后这类都交给 Hermes」。Bot 把它复述成一条规则，你确认之后才生效。规则带着来源消息，随时可以关。</li>
+<li><strong>规矩可以细到动作。</strong>一件事里的某个动作可以单独走另一条路。比如「写推文并发布」：写由 Bot 自己来，发布按规矩交回给你。做法是在事项下开一个子事项，只挂那一个动作。MVP 只允许一层子事项。</li>
+<li><strong>改派。</strong>干到一半说「别自己干了，换 T3 Code」：当前派工取消，Bot 整理交接包，开一次新派工。事项编号、会话里的卡片、已有产物都不变。换的是执行者，不是这件事。</li>
+</ul>
+
+<h3>7.5 权限：同一套开关，对所有执行者生效</h3>
+<p><span class="tag">已核验</span>设置里已经有「Bot 可以做什么」四个开关（<code>ui/state/preferences.ts</code>）。<span class="tag design">设计</span>它们按动作类别落在代码闸上，不写在提示词里，也不因为换了执行者就失效。</p>
+<table><thead><tr><th style="width:30%">现有开关</th><th>闸的行为</th></tr></thead><tbody>
+<tr><td>读取和保存本地文件</td><td>关闭时拒绝文件类动作；开启时限定在你连接的文件夹。</td></tr>
+<tr><td>使用浏览器</td><td>关闭时拒绝浏览器类动作。</td></tr>
+<tr><td>发布或发送前先问我</td><td>对外发布、发送类动作必须先拿到一次批准（提问卡片）。批准绑定到具体事项和具体内容，只能用一次。</td></tr>
+<tr><td>允许删除文件</td><td>默认拒绝删除。</td></tr>
+</tbody></table>
+<p>闸有多硬，取决于执行者：</p>
+<ul>
+<li><strong>自己干：硬。</strong>每次工具调用之前由钩子检查。</li>
+<li><strong>ACP 和 SDK 类：较硬。</strong>对方发起的权限请求转给 Bot 裁决，由它按开关放行、拒绝或问你。前提是以「需要批准」的模式启动对方，否则同样是弱约束。</li>
+<li><strong>T3 Code：弱。</strong>上限是你在 T3 Code 里批准给 DeepBot 的权限级别。DeepBot 只能在派工前检查，并把约束写进派工单。界面上要标出来。</li>
+</ul>
+<p>批准记在账本里：被拦下的动作先报「需要批准」，Bot 发提问卡片；你同意之后批准写入事项，执行者重试时，闸读到批准才放行。所以重启不丢批准，一次批准也用不了两次。</p></section>
+
+<section id="mvp"><h2><span class="partno">第一部分</span>8. 最小 MVP：个人 Bot</h2>
+<h3>8.1 范围</h3>
+<table><thead><tr><th style="width:50%">做</th><th>不做，但留好位置</th></tr></thead><tbody>
+<tr><td>一个人、桌面端、多个 Bot</td><td>群聊、多人、授权模型</td></tr>
+<tr><td>每个 Bot 一条常驻单聊；并行的话题由事项承担，不做「新建对话」</td><td>外部 IM（飞书、Slack）</td></tr>
+<tr><td>第 4 节的 IM 语义</td><td>检索式记忆、自动整理</td></tr>
+<tr><td>事项账本、事项卡片、提问卡片</td><td>后台常在线、多台电脑</td></tr>
+<tr><td>执行者端口和三个实现：自己干、T3 Code、你本人；随后加 ACP</td><td>执行者之间直接对话、多级子事项</td></tr>
+<tr><td>点名与规矩路由、改派、权限闸</td><td>自动学习规矩（先做确认式）</td></tr>
+<tr><td>重启后消息、事项、派工不丢</td><td></td></tr>
+</tbody></table>
+
+<h3>8.2 从现状到 MVP</h3>
+<table><thead><tr><th style="width:46%">现状 <span class="tag">已核验</span></th><th>MVP 要变成</th></tr></thead><tbody>
+<tr><td>一个 root 会话，所有 Bot 共用（<code>main.ts</code>）</td><td>每个 Bot 一条前台线</td></tr>
+<tr><td>命令只有 <code>input</code> 和 <code>abort</code>，requestId 可选（<code>protocol.ts</code>）</td><td>协议 v2：requestId 必填，命令带 botId、threadId、workId，可以定向取消</td></tr>
+<tr><td>snapshot 里消息是 <code>role: user | assistant</code>，外加一个 <code>busy</code> 布尔</td><td>消息带作者和类型；每件事有自己的阶段</td></tr>
+<tr><td>回复等于模型的最终文本，一问一答</td><td>输出契约（4.2）；汇报和定时也能唤醒 Bot</td></tr>
+<tr><td>界面用 mock 数据，<code>services/agent.ts</code> 还没接进界面</td><td><code>ui/state/</code> 由 sidecar 事件驱动；新增事项卡片、提问卡片</td></tr>
+<tr><td>sidecar 在 stdin 关闭时退出，随桌面进程生灭</td><td>MVP 保持不变，重启可续跑；常在线放到第二部分</td></tr>
+</tbody></table>
+
+<h3>8.3 落在 Pi Durable 上</h3>
+<p><span class="tag">已核验</span>下表右列的原语都在 Pi Durable 1.5.0 的 README 里。<span class="tag design">设计</span>怎么组合是本文提出的。</p>
+<table><thead><tr><th style="width:30%">设计概念</th><th>Pi Durable 原语</th></tr></thead><tbody>
+<tr><td>Bot 的前台线</td><td>ownerless conversation，用 <code>configure()</code> 设模型、指令、工具和 <code>maxTurns</code></td></tr>
+<tr><td>发送即入账，幂等</td><td><code>submit({ type: "input", requestId, entry: { kind: "im.message", … } })</code>；同一 requestId 返回同一个 submission</td></tr>
+<tr><td>忙时插话与排队</td><td><code>whenBusy: "steer"</code>，默认是 follow-up；设置 <code>steeringMode: "all"</code></td></tr>
+<tr><td>不唤醒 Bot 的消息和进度</td><td><code>submit({ type: "write", entry })</code>，忙时也立即写入</td></tr>
+<tr><td>这一轮不说话</td><td>工具结果返回 <code>control: { terminate: true }</code></td></tr>
+<tr><td>事项账本</td><td><code>defineDoc</code> 定义的类型化文档，和 entry 在同一次提交里</td></tr>
+<tr><td>入账时一并写自己的状态</td><td><code>harness.commit()</code> 里调用 <code>submit(tx, draft)</code></td></tr>
+<tr><td>派工（副作用）</td><td><code>defineTask</code> 定义的后台任务，和账本变更同一次提交创建；用 <code>sleepUntil</code> 轮询，abort handler 负责取消</td></tr>
+<tr><td>自己干的后台会话</td><td>由任务持有的子会话，<code>{ background: true }</code> 让它不占住前台</td></tr>
+<tr><td>汇报唤醒 Bot</td><td>回报任务向前台线 <code>submit</code> 一条输入，requestId 防止重启后重复投递</td></tr>
+<tr><td>权限闸</td><td><code>hook(ToolTask, { beforeTool })</code> 返回 <code>{ block }</code></td></tr>
+<tr><td>例行与定时</td><td>任务里的 <code>runtime.sleepUntil</code></td></tr>
+<tr><td>界面投影</td><td><code>watch()</code> 给出 entries、<code>pi.live</code>、<code>pi.inbox</code>；<code>watchTaskGraph()</code> 给出任务树</td></tr>
+</tbody></table>
+<p>一个简化：MVP 里单聊的会话记录和 Bot 的前台线一一对应，可以物理上合并成同一个 conversation。消息用带作者的自定义 entry 存，所以到群聊时拆成「群的公共记录 + 每个 Bot 各自的前台线」，不需要改消息格式。</p>
+
+<h3>8.4 模块结构</h3>
+<pre><code>packages/agent/src/
+  main.ts          组合根：打开 Harness、安装扩展、启动协议
+  protocol.ts      协议 v2：命令与事件
+  im/              入账、合并连发、消息到事项的归属
+  bot/             前台扩展：人设、管理工具（say / ask / pass / work_*）、看板注入
+  work/            账本文档、状态机、派工任务、验收
+  executors/       port.ts（接口与能力声明） self.ts  t3code.ts  acp.ts  human.ts
+  policy/          权限闸、路由规则
+  memory/          essential 记忆
+  projection.ts    把提交过的状态投影成界面事件
+
+apps/desktop/ui/
+  services/agent.ts     改讲协议 v2
+  state/                threads、works 由 sidecar 事件驱动，替换 mock
+  features/chat/        新增事项卡片、提问卡片、引用回复
+  features/bot-info/    「动态」页签显示这个 Bot 的事项与例行
+  features/settings/    新增「执行者」「规矩」两个分类</code></pre>
+<p class="evidence">界面部分动手之前，按 AGENTS.md 先读 DESIGN.md；新卡片先做成 <code>ui/components/</code> 里的组件。</p>
+
+<h3>8.5 协议 v2</h3>
+<pre><code>桌面 → sidecar（每条都带 requestId，重发不会重复生效）
+  message.send      { requestId, botId, threadId, text, replyTo?, attachments? }
+  attention.reply   { requestId, attentionId, value }
+  work.cancel       { requestId, workId }
+  work.reassign     { requestId, workId, executorId }
+  bot.upsert        { requestId, bot }
+  sync              { threadId, afterSeq }
+
+sidecar → 桌面（每条都带 seq，断线后用 sync 补）
+  thread.delta        { threadId, seq, messages, typing }
+  work.updated        { seq, work }               事项卡片原地更新
+  attention.opened    { seq, attention }
+  attention.resolved  { seq, attentionId }
+  executor.status     { executorId, available, reason }
+  ready / fatal</code></pre>
+
+<h3>8.6 实施顺序与验收</h3>
+<p>这份顺序替代报告 02 第 12 节的 P0、P1；那里的 P2 到 P4（IM 来源、记忆、常在线）对应本文第二部分。</p>
+<table><thead><tr><th style="width:15%">阶段</th><th style="width:36%">做什么</th><th>验收：能演示出来才算过</th></tr></thead><tbody>
+<tr><td><strong>M0</strong><br>IM 语义</td><td>协议 v2；消息带作者和 requestId；每个 Bot 一条前台线；合并连发、忙时插话；<code>say</code> 和 <code>pass</code>；界面接上真实数据</td><td>Bot 正在想时连发三条，三条进了同一轮。同一 requestId 重发不产生第二条。杀掉 sidecar 再启动，没答完的那轮续跑。Bot 能一次回两条，也能不回。</td></tr>
+<tr><td><strong>M1</strong><br>事项与后台线</td><td>账本、事项卡片；自己干的后台会话；停止；前台预算</td><td>后台有活在跑时另发一句话，Bot 照常回。同时两件事，停 A 不影响 B。重启后卡片阶段和实际一致。</td></tr>
+<tr><td><strong>M2</strong><br>执行者端口</td><td>端口与能力声明；T3 Code 适配器；真人执行者和提问卡片；派工单、汇报归一化、验收、改派；权限闸接上四个开关</td><td>说「用 T3 Code 做」，T3 Code 里出现线程，结果回到会话。T3 Code 等回答时，卡片显示「等你 · 去 T3 Code」。中途改派，事项编号和产物不变。开着「发布前先问我」，发布动作一定先出提问卡片。</td></tr>
+<tr><td><strong>M3</strong><br>第二种智能体与规矩</td><td>ACP 适配器（Hermes Agent 等）：实时进度、审批转发；路由规则（确认后生效）；essential 记忆；例行触发</td><td>Hermes 的权限请求出现在会话的提问卡片里，批准后它继续。说一次「以后改代码都交给 T3 Code」，确认后下次自动照办，并能在设置里看到、关掉。例行到点，Bot 主动发汇总。</td></tr>
+</tbody></table></section>
+
+<section id="group"><h2><span class="partno">第二部分</span>9. 未来扩展：群聊</h2>
+<h3>9.1 什么不变，什么新增</h3>
+<table><thead><tr><th style="width:42%">不变</th><th>新增</th></tr></thead><tbody>
+<tr><td>消息格式（本来就带作者）</td><td>会话成员多于两个；群有自己的公共记录，每个 Bot 在每个群里有自己的前台线</td></tr>
+<tr><td>事项、派工、汇报、提问</td><td>唤醒规则：哪条消息唤醒哪个 Bot</td></tr>
+<tr><td>执行者端口</td><td>两种新执行者：别的 Bot、群里的其他人</td></tr>
+<tr><td>权限闸、路由规则</td><td>授权：谁提的、能读什么、能做什么、回到哪儿</td></tr>
+<tr><td>协议事件、前台与后台分线</td><td>群记忆、外部 IM 入口与出站队列、后台常在线</td></tr>
+</tbody></table>
+
+<h3>9.2 谁被唤醒</h3>
+<p><span class="tag design">设计</span>群里不是每条消息都唤醒每个 Bot。入账之后先过一道确定性的 Gate：</p>
+<ol>
+<li>@ 了某个 Bot：唤醒它。</li>
+<li>回复某个 Bot 的消息，或引用它负责的事项卡片：唤醒它，消息归那件事。</li>
+<li>回答某个 Bot 的提问卡片：唤醒它。</li>
+<li>以上都不是：交给这个群的主持 Bot 做一次轻量分诊。它只有管理工具，可以回一句、派给别的 Bot，或者不理。没设主持 Bot，就谁也不唤醒。</li>
+<li>Bot 发的消息不唤醒别的 Bot。Bot 之间只通过派工交接，不靠在群里喊话。</li>
+</ol>
+
+<h3>9.3 一事一主，Bot 之间也是派工</h3>
+<ul>
+<li>每件事有且只有一个负责 Bot，群里的人随时看得到是谁。</li>
+<li>Bot A 把活派给 Bot B：对 A 来说，B 就是执行者 <code>bot:B</code>，走同一个端口。B 在自己的线上把它当作一件事来办，结果作为汇报回到 A，由 A 向提出的人交付。</li>
+<li>两种交接：派子活，负责人不变；移交，负责人换成对方，群里出一条系统提示。</li>
+<li>防循环：事项记着派工链，深度有上限，不能派回链上已经出现过的 Bot。</li>
+<li>真人执行者扩大到群成员：Bot 可以把一个动作 @ 给某个人，派工等这个人答复。超时只提醒一次，然后向提出的人说明卡在谁那儿。</li>
+</ul>
+
+<h3>9.4 授权：上下文可以广，动作必须窄</h3>
+<p>单聊里只有你一个人，所有请求天然是你授权的。群聊里必须回答三个问题，分开存、分开查：</p>
+<table><thead><tr><th style="width:20%">范围</th><th style="width:22%">回答的问题</th><th>规则</th></tr></thead><tbody>
+<tr><td><code>contextScope</code></td><td>能读什么</td><td>这个群的记录、这件事的资料。单聊历史和 Bot 主人的私有资料默认不可读。</td></tr>
+<tr><td><code>actionScope</code></td><td>能做什么</td><td>群成员可以提只读、调研、群范围内的事。碰到对外发布、删除、花钱、动主人的私有资料，变成给主人的提问卡片。</td></tr>
+<tr><td><code>replyScope</code></td><td>回到哪儿</td><td>回到提出请求的那个话题，不串到别的会话。</td></tr>
+</tbody></table>
+<ul>
+<li>每件事记下提出人和授权依据：谁提的、当时的规则版本、允许的动作类别。后续消息可以补充信息，不能自动扩大授权。</li>
+<li>群里任何人贴的文字都是资料。有人贴「忽略之前的规则」，它进上下文，但改不了 <code>actionScope</code>。</li>
+<li>主动性分三档，沿用 DSH：off；observe，只记录「本来会接」，不动手；auto，命中启用的规则才接。默认 observe。</li>
+</ul>
+
+<h3>9.5 上下文与记忆</h3>
+<ul>
+<li>给 Bot 的是上下文包：群摘要、最近原文、被引用的消息、上次之后的增量，不是整段历史。摘要带原消息 ID，可以回读。</li>
+<li>各 Bot 不共用模型上下文。共享的是公共记录、事项结果和产物。</li>
+<li>记忆分两种归属：群记忆和 Bot 私有记忆。隔离是单向的：群里学到的不自动进私有记忆；私有记忆能不能带进群，由 Bot 主人决定，默认不带。</li>
+</ul>
+
+<h3>9.6 外部 IM 与常在线</h3>
+<ul>
+<li>外部 IM 是又一种入口。适配器把飞书群、Slack 频道映射成会话，外部消息 ID 就是幂等键；回复走出站队列，带平台的幂等键，回到原话题。</li>
+<li>三种成功分开记：已接收、已办完、已送达。办完了但没送达，要看得见、能重试。</li>
+<li>外部身份和桌面身份不自动合并权限。</li>
+<li><span class="tag">已核验</span>Pi Durable 的存储同一时间只能由一个进程持有。所以要接外部 IM，就得让一个独立的后台服务成为唯一的执行宿主，桌面端变成它的客户端。</li>
+<li>多台电脑：执行者带「所在电脑」字段。远端机器上的执行者经它自己的服务接入，例如通过 T3 Code 的 MCP 端点连到另一台机器上的环境。</li>
+</ul>
+
+<h3>9.7 演进阶段</h3>
+<table><thead><tr><th style="width:17%">阶段</th><th style="width:36%">新增什么</th><th>验收</th></tr></thead><tbody>
+<tr><td><strong>G1</strong><br>内部群：我和多个 Bot</td><td>群的公共记录与各 Bot 前台线分离；唤醒规则；<code>bot:</code> 执行者；防循环。仍然只有你一个人，不需要授权模型</td><td>群里说一句不 @ 任何人，只有主持 Bot 被唤醒。@A 的活 A 派给 B，结果回到 A，由 A 交付。A 和 B 不会互相刷屏。</td></tr>
+<tr><td><strong>G2</strong><br>多人与外部 IM</td><td>先接飞书；身份、授权、三种范围、出站队列、后台常在线</td><td>非主人要求对外发布，变成给主人的审批。同一条外部消息重投只开一件事。关掉桌面后群里 @Bot 仍有回应，结果回到原话题。</td></tr>
+<tr><td><strong>G3</strong><br>主动性与群记忆</td><td>observe 和 auto 模式；群记忆与整理</td><td>observe 模式没有任何执行副作用。群里学到的事实不进 Bot 的私有记忆。</td></tr>
+</tbody></table></section>
+
+<section id="invariants"><h2>10. 从第一天就守住的不变量</h2>
+<p>守住这八条，群聊就是往 MVP 上加东西，而不是推倒重来。</p>
+<ol>
+<li>消息存作者，不存 user / assistant 角色。单聊就是两个成员的会话。</li>
+<li>产品会话不等于模型会话。界面只读投影；Bot 的模型上下文可以重建、压缩、换模型。</li>
+<li>每件事有且只有一个负责 Bot。执行者可以换，负责人不因改派而变。</li>
+<li>所有干活路径走执行者端口。前台不长时间干活。</li>
+<li>每个入站动作带幂等键（requestId、assignmentId、inputId）。先提交状态，再跑副作用。</li>
+<li>看得到上下文不等于有权动手。权限按动作类别在代码闸上检查，和执行者是谁无关。</li>
+<li>汇报是结构化的，不靠解析「看起来像做完了」的文字。</li>
+<li>进度不等于消息。进度进卡片，消息只留给人需要看的四种情况。</li>
+</ol></section>
+
+<section id="open"><h2>11. 风险与待你拍板</h2>
+<table><thead><tr><th style="width:24%">待定 <span class="tag open">待定</span></th><th style="width:40%">我的建议</th><th>什么情况下改主意</th></tr></thead><tbody>
+<tr><td>「human agent」指什么</td><td>两种都支持：Hermes Agent 走 ACP 适配器，真人走真人执行者</td><td>如果是别的产品，告诉我名字，我去查它的接入面</td></tr>
+<tr><td>第一个外部执行者先接谁</td><td>先 T3 Code：本机 CLI 最省事，还顺带拿到 Codex、Claude Code 等的现成界面。再接 ACP，补上审批转发和实时进度</td><td>你日常更多用 Hermes，就把顺序对调</td></tr>
+<tr><td>一个 Bot 是否只有一条常驻会话</td><td>是。并行的话题由事项承担</td><td>你想要 OpenBot 那样的多条 side thread</td></tr>
+<tr><td>界面上怎么称呼</td><td>「事项」和「例行」</td><td>你更习惯「任务」，就统一改名</td></tr>
+<tr><td>MVP 要不要常在线</td><td>不要。sidecar 随桌面进程，重启续跑</td><td>第一版就要接外部 IM，那必须先做后台服务</td></tr>
+</tbody></table>
+<table><thead><tr><th style="width:36%">风险</th><th>对策</th></tr></thead><tbody>
+<tr><td><span class="tag">已核验</span>Pi Durable 自己标注 Experimental，API 会不打招呼地变</td><td>锁定 1.5.0；业务代码只通过自己的前台线和账本薄封装去用它。</td></tr>
+<tr><td>外部执行者的约束强度不一</td><td>能力声明加界面标注。不能转发审批的执行者，只接你点名的活或规则明确放行的活。</td></tr>
+<tr><td>前台模型话太多，或者该说不说</td><td>输出契约写进人设；把 8.6 的验收场景做成回归用例。</td></tr>
+<tr><td>自己验收自己容易放水</td><td>验收只看证据（文件、命令输出），不看执行者的自述。</td></tr>
+<tr><td>sidecar 随桌面退出，活会停</td><td>恢复没问题，但不是常在线。后台服务放在 G2。</td></tr>
+</tbody></table></section>
+
+<section id="sources"><h2>12. 依据与边界</h2>
+<ol class="small">
+<li><strong>本地代码</strong>：<code>packages/agent/src/main.ts</code>、<code>packages/agent/src/protocol.ts</code>、<code>apps/desktop/src/sidecar.rs</code>、<code>apps/desktop/ui/services/agent.ts</code>、<code>apps/desktop/ui/state/</code>（types、bots、preferences、mock）、<code>apps/desktop/ui/features/bot-info/BotInfoPanel.tsx</code>、DESIGN.md、README.md。</li>
+<li><strong>Pi Durable 1.5.0 README</strong>（<code>node_modules/@earendil-works/pi-durable/README.md</code>）：Concepts、Persist and Resume、Tools、Per-Conversation Agent、Watching a Conversation、Busy Conversations、Hooks、Abort and Subagents、Child Tasks、Your Own State、Storage，以及它列出的示例 19、22、34。</li>
+<li><strong>T3 Code</strong>：<a href="https://github.com/pingdotgg/t3code/blob/main/AGENTS.md">AGENTS.md</a>（架构、术语、provider 列表）；<a href="https://github.com/pingdotgg/t3code/blob/main/docs/user/outside-agents.md">docs/user/outside-agents.md</a>（MCP 端点、权限级别、<code>t3 thread</code> CLI）；<a href="https://github.com/pingdotgg/t3code">README</a>。</li>
+<li><strong>Hermes Agent</strong>：<a href="https://github.com/NousResearch/hermes-agent/blob/main/website/docs/reference/cli-commands.md">CLI 命令参考</a>（<code class="nb">hermes acp</code>、<code>hermes chat --oneshot</code>、<code>--resume</code>、<code>hermes peer</code>）。</li>
+<li><strong>Agent Client Protocol</strong>：<a href="https://agentclientprotocol.com/protocol/v1/overview">v1 概览</a>。</li>
+<li><strong>Claude Agent SDK</strong>：<a href="https://code.claude.com/docs/en/agent-sdk/typescript">TypeScript 参考</a>。</li>
+<li><strong>报告 01、02</strong>：OpenBot 与 DSH Superagent 的固定提交源码调研。</li>
+</ol>
+<p class="meta">边界：外部产品的事实来自以上公开文档在读取当天的版本，没有安装或连接 T3 Code、Hermes Agent 做端到端验证。T3 Code 的 MCP 工具名、CLI 是否支持停止，文档没有写明，表中已标注。ACP 一栏按 v1 写，v2 仍是草案。Pi Durable 的映射依据 README，没有写代码验证。</p></section>
+
+<footer>本文是设计文档，没有改动 DeepBot 的应用实现。三份报告合用：01 提供持久 Bot 与记忆模型，02 提供消息到授权任务的控制流程，03 把两者落成 DeepBot 的 Bots 结构。</footer>
+</main>
+</body>
+</html>

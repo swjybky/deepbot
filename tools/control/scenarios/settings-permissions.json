@@ -1,0 +1,21 @@
+{
+  "description": "切换权限开关，再尝试连接不存在的文件夹并核对中文提示",
+  "design": ["DESIGN.md", "design/components/dialog.md", "design/components/switch.md", "design/components/feedback.md"],
+  "steps": [
+    {"wait": "id:sidebar-account"},
+    {"press": "id:sidebar-account"},
+    {"wait": "id:settings-permissions"},
+    {"press": "id:settings-permissions"},
+    {"wait": "label:使用浏览器"},
+    {"screenshot": "01-permissions"},
+    {"press": "label:使用浏览器"},
+    {"screenshot": "02-browser-off"},
+    {"press": "label:允许删除文件"},
+    {"screenshot": "03-delete-permission-on"},
+    {"press": "id:settings-computer"},
+    {"type": ["id:connected-folder-input", "/verify-missing-folder"]},
+    {"press": "id:connected-folder-add"},
+    {"wait": "label:错误：文件夹不存在：/verify-missing-folder"},
+    {"screenshot": "04-folder-not-found"}
+  ]
+}

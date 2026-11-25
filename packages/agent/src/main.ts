@@ -1,115 +1,122 @@
-// DeepBot agent sidecar. Runs a Pi Durable Harness on SQLite and speaks the
-// JSON-lines protocol in ./protocol.ts over stdio. The desktop app spawns it.
-//
-// Env:
-//   ANTHROPIC_API_KEY  provider credential (read by pi-ai)
-//   DEEPBOT_MODEL      model id (default claude-sonnet-5-5)
-//   DEEPBOT_DATA_DIR   where session.sqlite lives (default ~/.local/share/deepbot)
-
-import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
+/** Desktop-owned protocol v2 sidecar; stdout is JSON-lines only. */
+import {
+  mkdirSync,
+  openSync,
+  closeSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+  unlinkSync,
+} from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { DeepBotApp } from "./runtime/app.ts";
+import { createConfiguredModelRuntime } from "./runtime/model-config.ts";
+import { dataDirectory, prepareDataDirectory } from "./runtime/data-directory.ts";
+import { T3CodeConnector } from "./connectors/t3code.ts";
+import { ACPConnector } from "./connectors/acp.ts";
+import { readConnectorsConfig } from "./connectors/config.ts";
+import { CHAT_IMAGE_TOTAL_BYTES, type AgentMessage } from "./protocol.ts";
+import { errorMessage, isRecord } from "./wire-values.ts";
+import { staleProcessLock } from "./runtime/process-id.ts";
 
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createModels } from "@earendil-works/pi-ai/models";
-import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
-import { type ConversationView, createRegistry, Harness } from "@earendil-works/pi-durable";
-import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-
-import type { AgentMessage, ChatMessage, HostMessage } from "./protocol.ts";
-
-const context = BACKGROUND_CONTEXT;
-const modelId = process.env.DEEPBOT_MODEL ?? "claude-sonnet-5-5";
-const dataDir = process.env.DEEPBOT_DATA_DIR ?? join(homedir(), ".local", "share", "deepbot");
-const storagePath = join(dataDir, "session.sqlite");
-
-function emit(message: AgentMessage): void {
-  process.stdout.write(`${JSON.stringify(message)}\n`);
+const dataDir = dataDirectory();
+function emit(event: AgentMessage) {
+  process.stdout.write(JSON.stringify(event) + "\n");
 }
-
-/** Concatenated text blocks of a pi-ai message's content. */
-function textOf(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((block): block is { type: "text"; text: string } => block?.type === "text" && typeof block.text === "string")
-    .map((block) => block.text)
-    .join("");
-}
-
-function snapshot(view: ConversationView): AgentMessage {
-  const messages: ChatMessage[] = [];
-  for (const entry of view.entries) {
-    for (const message of entry.model ?? []) {
-      if (message.role !== "user" && message.role !== "assistant") continue;
-      const text = textOf(message.content);
-      if (text) messages.push({ id: `${entry.id}:${messages.length}`, role: message.role, text });
-    }
-  }
-  const live = view.docs["pi.live"] as
-    | { run?: unknown; generation?: { message?: { content?: unknown } }; runFailure?: { reason?: string; detail?: string } }
-    | undefined;
-  const partial = live?.generation?.message ? textOf(live.generation.message.content) : null;
-  const failure = live?.runFailure;
-  return {
-    type: "snapshot",
-    messages,
-    partial: partial || null,
-    busy: live?.run !== undefined,
-    error: failure ? [failure.reason, failure.detail].filter(Boolean).join(": ") : null,
-  };
-}
-
-async function main(): Promise<void> {
-  mkdirSync(dataDir, { recursive: true });
-
-  const models = createModels();
-  models.setProvider(anthropicProvider());
-
-  const harness = await Harness.open(
-    await openNodeSqliteStorage(storagePath),
-    { models, registry: createRegistry(), identity: { attribution: null } },
-    context,
-  );
-  const root = await harness.root(context, { agent: { model: { provider: "anthropic", modelId } } });
-  harness.resume(); // continue a run the last process left unfinished
-
-  const watch = await root.watch(context);
-  emit({ type: "ready", model: modelId, storage: storagePath });
-  emit(snapshot(watch.value));
-  watch.start(async (call) => {
-    if (call.kind === "value") emit(snapshot(call.value));
-  });
-
-  const lines = createInterface({ input: process.stdin });
-  for await (const line of lines) {
-    if (!line.trim()) continue;
-    let message: HostMessage;
+function lock() {
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  const path = join(dataDir, "agent.lock");
+  for (let attempt = 0; attempt < 2; attempt++)
     try {
-      message = JSON.parse(line) as HostMessage;
-    } catch {
-      console.error(`deepbot-agent: ignoring malformed line: ${line}`);
-      continue;
+      const fd = openSync(path, "wx", 0o600);
+      writeFileSync(fd, String(process.pid));
+      closeSync(fd);
+      return () => {
+        try {
+          if (readFileSync(path, "utf8") === String(process.pid))
+            unlinkSync(path);
+        } catch {}
+      };
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      const pid = Number(readFileSync(path, "utf8"));
+      if (!staleProcessLock(pid, statSync(path).mtimeMs))
+        throw new Error("已有 DeepBot sidecar 正在使用此数据目录");
+      unlinkSync(path);
     }
-    try {
-      if (message.type === "input") {
-        await root.submit({ type: "input", content: message.content, requestId: message.requestId }, context);
-      } else if (message.type === "abort") {
-        await root.abort(context);
+  throw new Error("无法取得 DeepBot 数据目录锁");
+}
+async function main() {
+  prepareDataDirectory();
+  const unlock = lock();
+  let app: DeepBotApp | undefined;
+  try {
+    const runtime = await createConfiguredModelRuntime();
+    const config = readConnectorsConfig(dataDir);
+    // Codex model mode defaults T3 to its own codex provider with the same model.
+    const t3Model = config.t3.provider
+      ? { provider: config.t3.provider, model: config.t3.model }
+      : runtime.provider === "openai-codex"
+        ? { provider: "codex", model: runtime.modelId }
+        : {};
+    app = await DeepBotApp.open({
+      dataDir,
+      ...runtime,
+      emit,
+      mcp: config.mcp,
+      connectors: [
+        new T3CodeConnector({
+          dataDir, url: config.t3.url, token: config.t3.token, runtimeMode: config.t3.runtimeMode, approvalToken: config.t3.approvalToken, ...t3Model,
+          activePermissions: async assignmentId => app?.activeAssignmentPermissions(assignmentId),
+        }),
+        ...config.acp.map((entry) => new ACPConnector({ dataDir, ...entry, policy: () => app!.connectorPolicy() })),
+      ],
+    });
+    const lines = createInterface({ input: process.stdin });
+    let stopping = false;
+    const stop = () => {
+      if (!stopping) {
+        stopping = true;
+        lines.close();
       }
-    } catch (error) {
-      console.error("deepbot-agent:", error);
+    };
+    process.once("SIGTERM", stop);
+    process.once("SIGINT", stop);
+    for await (const line of lines) {
+      if (!line.trim()) continue;
+      let raw: unknown;
+      try {
+        const commandLimit = 1024 * 1024;
+        if (line.length > commandLimit + Math.ceil(CHAT_IMAGE_TOTAL_BYTES / 3) * 4 + 12)
+          throw new Error("图片消息超过大小上限");
+        raw = JSON.parse(line);
+        if (line.length > commandLimit && (!isRecord(raw) || raw.type !== "message.send-images"))
+          throw new Error("命令超过 1 MB");
+        await app.command(raw);
+      } catch (error) {
+        emit({
+          type: "error",
+          seq: await app.sequence(),
+          ...(isRecord(raw) && typeof raw.requestId === "string"
+            ? { requestId: raw.requestId }
+            : {}),
+          message: errorMessage(error),
+        });
+      }
     }
+  } finally {
+    await app?.close();
+    unlock();
   }
-
-  // stdin closed: the host is gone.
-  await watch.stop();
-  await harness.close(context);
 }
-
-main().catch((error: unknown) => {
-  emit({ type: "fatal", message: error instanceof Error ? error.message : String(error) });
-  console.error(error);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    emit({
+      type: "fatal",
+      seq: 0,
+      message: errorMessage(error),
+    });
+    process.exit(1);
+  });

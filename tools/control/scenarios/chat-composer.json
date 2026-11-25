@@ -1,0 +1,18 @@
+{
+  "description": "核对聊天输入框从单行自动折行、到达高度上限、发送后恢复单行",
+  "design": ["DESIGN.md", "design/layout.md", "design/components/input.md", "design/components/icon.md"],
+  "steps": [
+    {"wait": "label:查看 小菜 的信息"},
+    {"wait": "label:添加附件"},
+    {"type": ["id:composer-input", "先写一句短消息"]},
+    {"screenshot": "01-short"},
+    {"type": ["id:composer-input", "。这段文字继续写下去。输入框会根据当前对话栏的宽度自动换行，整段文字仍然是一段连续的内容。写完可以继续编辑，也可以直接按回车发送。"]},
+    {"screenshot": "02-wrapped"},
+    {"type": ["id:composer-input", "这一段用来观察输入区到达上限时的样子。上下滚动时可以查看先前输入的内容，也可以回到光标所在的位置继续写。拖动分栏会让聊天区域变窄或变宽，文本会随可用宽度重新排版。输入内容变多时，发送和添加附件按钮始终可以点击。聊天记录还保留自己的滚动区域。这里只继续输入文字，确认超过上限后输入条和两个按钮的位置保持稳定。还可以点击正文中的任一行，移动光标并修改已有的内容。再补充一段没有手动换行的长文字，用于检查达到上限以后还有内容可以在输入框内滚动查看。"]},
+    {"screenshot": "03-capped"},
+    {"press": "id:composer-send"},
+    {"wait": "text:DEEPBOT_VERIFY_OK"},
+    {"value": ["id:composer-input", ""]},
+    {"screenshot": "04-sent"}
+  ]
+}

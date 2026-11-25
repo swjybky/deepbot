@@ -1,0 +1,29 @@
+{
+  "description": "从动态打开验收详情、展开目标、关闭并反复重新打开",
+  "design": ["DESIGN.md", "design/components/list.md", "design/components/dialog.md"],
+  "steps": [
+    {"wait": "id:bot-xiaocai"},
+    {"type": ["id:composer-input", "DEEPBOT_VERIFY_WORK"]},
+    {"press": "id:composer-send"},
+    {"wait": "text:已发起验证事项"},
+    {"press": "id:bot-pill"},
+    {"wait": "label:查看事项 验证事项，验收中"},
+    {"screenshot": "01-activity"},
+    {"press": "label:查看事项 验证事项，验收中"},
+    {"wait": "id:work-detail-dialog"},
+    {"screenshot": "02-work-detail"},
+    {"press": "id:work-detail-dialog >> label:展开验证事项"},
+    {"wait": "id:work-detail-dialog >> label:收起验证事项"},
+    {"press": "id:work-detail-dialog >> label:关闭"},
+    {"gone": "id:work-detail-dialog"},
+    {"screenshot": "03-closed"},
+    {"press": "label:查看事项 验证事项，验收中"},
+    {"wait": "id:work-detail-dialog >> label:展开验证事项"},
+    {"screenshot": "04-reopened"},
+    {"press": "id:work-detail-dialog >> label:关闭"},
+    {"gone": "id:work-detail-dialog"},
+    {"press": "label:查看事项 验证事项，验收中"},
+    {"wait": "id:work-detail-dialog >> label:展开验证事项"},
+    {"screenshot": "05-reopened-again"}
+  ]
+}

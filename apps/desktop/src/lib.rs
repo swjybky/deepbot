@@ -32,8 +32,10 @@ impl Agent {
         sidecar::send(&line)
     }
 
-    /// The next JSON line (an `AgentMessage`) from the sidecar; null once it has exited.
+    /// The next JSON line (an `AgentMessage`); process exit is a fatal event.
+    /// The stream stays open so the same consumer can follow a restarted sidecar.
     pub async fn next() -> Option<String> {
         sidecar::next().await
     }
+
 }

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec node tools/control/cli.mjs check --staged

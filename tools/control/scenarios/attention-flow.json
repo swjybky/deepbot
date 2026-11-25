@@ -1,0 +1,16 @@
+{
+  "description": "让合成模型提出选择题，点选答复并验证卡片收起其它选项",
+  "design": ["DESIGN.md", "design/components/list.md", "design/layout.md"],
+  "steps": [
+    {"wait": "id:bot-xiaocai"},
+    {"type": ["id:composer-input", "DEEPBOT_VERIFY_ASK"]},
+    {"press": "id:composer-send"},
+    {"wait": "label:整理周报"},
+    {"screenshot": "01-open"},
+    {"press": "label:整理周报"},
+    {"gone": "label:检查资料"},
+    {"gone": "label:其他答复"},
+    {"wait": "text:整理周报"},
+    {"screenshot": "02-answered"}
+  ]
+}

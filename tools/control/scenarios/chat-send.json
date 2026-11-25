@@ -1,0 +1,13 @@
+{
+  "description": "在默认 Bot 小菜的对话里输入并点发送，等到本地模型回复",
+  "design": ["DESIGN.md", "design/layout.md", "design/components/feedback.md"],
+  "steps": [
+    {"wait": "label:查看 小菜 的信息"},
+    {"wait": "id:composer-input"},
+    {"type": ["id:composer-input", "你好，验证一下"]},
+    {"screenshot": "01-typed"},
+    {"press": "id:composer-send"},
+    {"wait": "text:DEEPBOT_VERIFY_OK"},
+    {"screenshot": "02-replied"}
+  ]
+}

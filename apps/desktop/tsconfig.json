@@ -1,4 +1,22 @@
 {
   "extends": "./.nsh/tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "allowImportingTsExtensions": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "skipLibCheck": false,
+    "paths": {
+      "nsh": ["./types/nsh.d.ts"],
+      "nsh/base": ["./types/nsh-base.d.ts"],
+      "nsh/*": ["./.nsh/types/nsh/*.d.ts"],
+      "*": ["./.nsh/types/*.d.ts"]
+    }
+  },
   "include": ["**/*.ts", "**/*.tsx"]
 }

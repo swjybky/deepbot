@@ -1,0 +1,24 @@
+{
+  "description": "打开模型设置，编辑并保存测试模型名",
+  "design": ["DESIGN.md", "design/components/dialog.md", "design/components/input.md", "design/tokens.md"],
+  "steps": [
+    {"wait": "id:sidebar-account"},
+    {"press": "id:sidebar-account"},
+    {"wait": "id:settings-models"},
+    {"press": "id:settings-models"},
+    {"wait": "id:model-group-openai"},
+    {"press": "id:model-group-openai"},
+    {"wait": "id:model-edit-default"},
+    {"screenshot": "01-model-list"},
+    {"press": "id:model-edit-default"},
+    {"wait": "id:model-editor"},
+    {"screenshot": "02-model-editor"},
+    {"clear": "id:model-name"},
+    {"type": ["id:model-name", "验证模型"]},
+    {"press": "id:model-save"},
+    {"gone": "id:model-editor"},
+    {"wait": "text:验证模型"},
+    {"screenshot": "03-model-saved"}
+  ],
+  "expect": {"modelConfig": {"id": "default", "name": "验证模型"}}
+}

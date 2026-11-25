@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DSH Superagent：IM 任务架构调研与 DeepBot 组合设计</title><style>:root{--ink:#182638;--muted:#586778;--line:#dce4eb;--blue:#185a9d;--soft:#f1f6fa;--green:#107466}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#f3f6f9;color:var(--ink);font:16px/1.85 system-ui,-apple-system,"Noto Sans CJK SC","Microsoft YaHei",sans-serif}main{max-width:1120px;margin:28px auto;background:white;padding:44px 58px;border:1px solid var(--line);border-radius:14px}header{border-bottom:3px solid var(--blue);padding-bottom:24px}h1{font-size:32px;line-height:1.4;margin:8px 0 18px}h2{font-size:24px;margin:40px 0 15px;border-bottom:1px solid var(--line);padding-bottom:8px}h3{font-size:19px;margin:24px 0 10px}p{margin:12px 0}a{color:var(--blue);overflow-wrap:anywhere}code{background:var(--soft);border-radius:4px;padding:2px 5px;font:0.87em ui-monospace,monospace;overflow-wrap:anywhere}pre{background:#f3f6f9;border:1px solid var(--line);padding:18px;overflow:auto;line-height:1.65;font-size:13px}table{border-collapse:collapse;width:100%;font-size:14px;margin:18px 0}th,td{text-align:left;vertical-align:top;border:1px solid var(--line);padding:10px 12px}th{background:var(--soft)}ul,ol{padding-left:25px}li{margin:7px 0}.kicker{font-weight:700;color:var(--blue);font-size:13px;letter-spacing:.12em}.meta,.evidence{font-size:13px;color:var(--muted)}.callout{padding:18px 22px;background:#eef6fc;border-left:4px solid var(--blue);margin:20px 0}.proposal{background:#eff8f5;border-left-color:var(--green)}.tag{display:inline-block;padding:2px 9px;font-size:12px;border-radius:5px;background:#e7f1fb;color:var(--blue);margin-right:6px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.node{border:1px solid #bfd0df;background:var(--soft);border-radius:8px;padding:16px;text-align:center}.node strong{display:block}.arrow{text-align:center;color:var(--blue);font-size:24px;line-height:1.5}.diagram{margin:18px 0;padding:20px;border:1px solid var(--line);border-radius:8px}.rail{border:1px solid #9cb6cd;background:#eaf3fa;padding:16px;text-align:center;border-radius:8px}.small{font-size:13px}.toc{columns:2;column-gap:36px}.toc a{display:block;padding:4px 0;text-decoration:none}footer{margin-top:40px;border-top:1px solid var(--line);padding-top:15px;color:var(--muted);font-size:13px}@media(max-width:750px){body{background:white}main{padding:20px 17px;margin:0;border:0}h1{font-size:26px}.grid{grid-template-columns:1fr}.toc{columns:1}table{display:block;overflow:auto}h2{font-size:22px}}@media print{body{background:white;font-size:11pt}main{max-width:none;border:0;margin:0;padding:0}a{color:inherit;text-decoration:none}h2,h3{break-after:avoid}tr,.node{break-inside:avoid}.toc{display:none}pre{white-space:pre-wrap}table{font-size:9pt}.diagram{break-inside:avoid}}
+</style></head><body><main><header><div class="kicker">BOT 架构调研 · 02 / 02</div><h1>DSH Superagent：事件驱动的 IM 任务协作系统</h1><p>解析 DeepSeek Harness 插件的路由、授权、执行、上下文流动与恢复机制，并给出适合 DeepBot 的整体架构。</p><p class="meta">调研日期：2026-11-09（America/Los_Angeles；抓取时 UTC 为 2026-11-10）<br>对象：deepseek-ai/dsh-superagent-prototype；package 版本 0.1.0<br>分析提交：<code>8c32a9dc5d72c033816c6a8110b37f40cf94fba4</code></p></header>
+<div class="callout"><strong>核心判断：</strong>这个插件的中心不是“一个 Bot 对应一条聊天”，而是“多个来源的事件，推动一个持续存在的协作体”。Router 判断新工作，Worker 承担任务，订阅把后续讨论直接送回任务；Policy 和 Mandate 决定能做什么，数据库和持久副作用队列保证工作能继续。</div>
+<p class="meta">证据标记：<span class="tag">已实现</span>固定提交可核验；<span class="tag">推断</span>架构含义与局限；<span class="tag">建议</span>DeepBot 目标设计。官方 README 明确将本项目称为研究原型，且指出公开代码与内部版本、设计文章不完全相同。本文不把文章中的构想或第三方解读当成已交付功能。未连接真实 GitHub / 飞书账号，未运行该插件的真实模型任务。<a href="#D1">[D1]</a></p>
+<nav class="toc"><a href="#philosophy">1. 设计思路</a><a href="#architecture">2. 总体架构</a><a href="#domain">3. 核心领域对象</a><a href="#im">4. IM 通信与任务归属</a><a href="#authorization">5. 授权与主动性</a><a href="#runtime">6. 运行时与生命周期</a><a href="#context">7. 上下文共享</a><a href="#memory">8. 记忆的真实边界</a><a href="#recovery">9. 持久化与恢复</a><a href="#comparison">10. 两个项目的取舍</a><a href="#deepbot">11. DeepBot 组合架构</a><a href="#roadmap">12. 实施顺序与验收</a><a href="#sources">13. 源码索引</a></nav>
+
+<section id="philosophy"><h2>1. 设计思路：用户管理工作，系统管理执行会话</h2>
+<p><span class="tag">已实现</span>公开原型面向一个 GitHub 仓库，监听 GitHub，并可选接入飞书。被允许的用户提出请求后，系统创建 Ticket，在独立 DSH Session 和目录中处理，结果送回原始讨论。产品原则是降低团队注意力成本：仅在有授权请求或明确规则时行动，仅在有结果、需要决定或确实无法继续时打扰人。<a href="#D1">[D1]</a> <a href="#D2">[D2]</a></p>
+<p><span class="tag">推断</span>其核心抽象是“跨渠道持续推进的授权任务”。用户可以在飞书交代工作，在 GitHub 审阅，再回飞书追问；执行单元仍是同一个 Ticket，而不是三个互相不知道的聊天窗口。技术会话被放到后台，任务身份成为跨平台连续性的支点。</p>
+<p>这与常见“Webhook → 一次 LLM 调用 → 回复”有本质结构差异：Ticket 可以等待、恢复、换 Assignment；Thread 可以关联多个任务；模型返回一句话并不自动意味着业务完成。</p></section>
+
+<section id="architecture"><h2>2. 总体架构与插件边界</h2>
+<div class="diagram" role="img" aria-label="DSH Superagent 事件驱动总体架构"><div class="grid"><div class="node"><strong>GitHub Source</strong>通知、Issue、PR、Review、CI</div><div class="node"><strong>Feishu Source</strong>实时事件、补历史、话题轮询</div><div class="node"><strong>管理面板</strong>策略、人工停止、重试、待办</div></div><div class="arrow">↓</div><div class="rail"><strong>Runtime / SourceRegistry / Passes</strong><br>组合依赖、启动与关闭、来源能力、串行控制循环</div><div class="arrow">↓</div><div class="rail"><strong>Engine：领域规则唯一写入口</strong><br>Intake → Evals → Tickets → Assignments → Replies<br>事务内写 Trigger / Thread / Decision / Mandate / Ticket</div><div class="arrow">↓</div><div class="grid"><div class="node"><strong>Router / 主 Session</strong>判断、路由、短通知<br>不承担长时间实现</div><div class="node"><strong>Subscriptions</strong>后续消息按线程扇出<br>上下文不授予新权限</div><div class="node"><strong>DshExecutor / Workers</strong>每 Ticket 独立 Session / 目录<br>执行、报告、等待与恢复</div></div><div class="arrow">↕</div><div class="rail"><strong>SQLite Store + Effects + Outbox</strong><br>先提交状态，再运行副作用；重试、幂等、回执与可观测性</div><div class="arrow">↓</div><div class="grid"><div class="node"><strong>DSH 宿主</strong>模型、Session、Inbox、工具、会话持久化</div><div class="node"><strong>执行环境</strong>工作目录、git worktree、命令与账号 wrapper</div><div class="node"><strong>Channel 回送</strong>原飞书话题、GitHub 评论与 review</div></div></div>
+<p><span class="tag">已实现</span>这是一个 Cordis / DSH bundle：主插件、GitHub 来源插件和默认禁用的飞书来源插件，加 Router / Worker presets 与 Web 管理面板。模型工具循环、会话持久化由 DSH 宿主提供；插件主要拥有业务状态与调度规则。<a href="#D3">[D3]</a> <a href="#D4">[D4]</a></p>
+<p><code>Runtime</code> 是组合根，<code>Engine</code> 才是领域规则中心。Engine 的命令同步执行并在事务中更新聚合；外部工作经端口写入 Effects，提交后才执行。这样来源插件、UI 和模型工具不能各自发明一套状态更新流程。<a href="#D4">[D4]</a> <a href="#D5">[D5]</a></p></section>
+
+<section id="domain"><h2>3. 核心领域对象：为什么要分这么细</h2>
+<table><thead><tr><th>对象</th><th>职责与约束</th><th>不应混同的概念</th></tr></thead><tbody>
+<tr><td>Source</td><td>接收外界事件，持有读游标与自身 Bot 身份；过滤自己的消息，声明读和写能力。</td><td>不是一个模型 Agent。</td></tr>
+<tr><td>Trigger</td><td>不可变输入事件，保留发送者、时间、所属 Thread；ID 用于去重。</td><td>事件不一定是新任务。</td></tr>
+<tr><td>Thread</td><td>来源定义的时间有序讨论，保存订阅、待评估事件和 Decision 历史；每个 Thread 最多一个 Eval。</td><td>不是模型 Session；一个 Thread 可有多个 Ticket。</td></tr>
+<tr><td>Correlation</td><td>同一 Trigger 所属多个 Thread 之间的关联，补充判断证据。</td><td>关联不自动路由任务。</td></tr>
+<tr><td>Policy / Eval</td><td>版本化规则；确定性 Gate 与模型 Assessment 共同判断新工作。</td><td>模型不能通过一句解释绕过硬检查。</td></tr>
+<tr><td>Mandate</td><td>记录授权强度、范围、来源身份、策略版本和匹配规则。</td><td>后续消息不是自动扩权。</td></tr>
+<tr><td>Ticket</td><td>被授权的工作单位，拥有 Inputs、Channels、Assignments 与结束状态。</td><td>不跟随模型 Session 的 busy / idle 简单变化。</td></tr>
+<tr><td>Assignment / Executor</td><td>一次派工绑定；Executor 是执行端口，具体实现是 DSH Session 和目录。</td><td>重新派工可以保留原 Ticket、代码分支和 Session。</td></tr>
+<tr><td>Subscription</td><td>Thread 到 Ticket 的多对多消息路由。</td><td>读取上下文不代表发起新工作的权限。</td></tr>
+<tr><td>Channel / Outbox</td><td>回复地址与持久发送请求、回执。</td><td>这里的 Channel 是输出端口，不等于 OpenBot 的内部协作群。</td></tr>
+</tbody></table><p class="evidence">依据：<a href="#D6">[D6]</a> <a href="#D5">[D5]</a>。</p></section>
+
+<section id="im"><h2>4. IM 通信：新请求走路由，后续讨论走订阅</h2>
+<h3>4.1 接入的真实实现</h3>
+<p><span class="tag">已实现</span>飞书插件启动 <code>lark-cli event consume im.message.receive_v1 --as bot</code> 子进程，逐行解析事件；断开后退避重连。同时有聊天历史补读和订阅话题轮询。Trigger 保留 messageId、chatId、rootId、parentId、mention / direct 等来源信息，以稳定消息 ID 去重。首次建立历史读游标时从当前时间开始，不能理解为自动导入所有过往聊天。<a href="#D7">[D7]</a> <a href="#D8">[D8]</a></p>
+<p>GitHub 侧使用专用账号的 CLI 拉通知、Issue / PR / 评论与 CI 变化，按 Thread 保存读取状态。它不是要求每个 GitHub 事件都从 webhook 进入的实现。来源负责把 GitHub 和飞书各自的协议映射到统一 Trigger / Thread / Channel。<a href="#D9">[D9]</a></p>
+<h3>4.2 一条飞书请求如何走到交付</h3>
+<pre>用户 @Bot：修复登录错误
+  1. Feishu Source 记录 Trigger，标出 actor 与 replied-to 信息
+  2. Engine 去重 → 保存 Thread 时间线
+  3. 若没有已有 Ticket 承接 → Gate → Router 路由 / Assessment
+  4. accept → Ticket + Mandate + 首次 Assignment + 订阅，事务提交
+  5. Effects.launch → 准备目录 → worker-&lt;ticket-id&gt;
+  6. Worker 在原消息下确认一次 → 执行 / 验证 / 创建 PR
+  7. PR Thread 绑定 Ticket；Review / CI 作为 Input 到达 Worker
+  8. Worker report：ready / blocked / failed / human_action 等
+  9. Router 与领域回复规则 → Outbox → 原飞书话题
+ 10. 相关 PR 达到完成规则后，Ticket 结束并保留订阅</pre>
+<p class="evidence">这是按实现重构的示例，不是本次真实运行记录。依据：<a href="#D6">[D6]</a> <a href="#D10">[D10]</a> <a href="#D11">[D11]</a>。</p>
+<h3>4.3 用户边执行边补充，不必重新召唤主路由</h3>
+<p><span class="tag">已实现</span>一个人的消息已通过订阅到达任务时，通常由 Worker 拥有并处理，不再重复做新任务 Eval。Worker 判断超范围或应由别的 Ticket 处理时，显式 handback；只有没有其他 Ticket 继续拥有该消息，才进入新的评估。主 Session 收到 follow-up notice，但不能趁 Worker 正处理时另开重复任务。<a href="#D12">[D12]</a></p>
+<p>只为参考而 follow 的 Thread 属于 context-only：它能补充事实，但不获得该线程的人类 follow-up 所有权，也不能靠那里的消息恢复一个已结束任务。自动机器人与 CI 也不能像人的跟进一样任意恢复已结束 Ticket。被人明确停止的 Ticket 则不自动恢复。<a href="#D6">[D6]</a> <a href="#D12">[D12]</a></p>
+<h3>4.4 通知设计：少而有用</h3>
+<p>协议区分 acknowledgement、answer、result、attention，普通进度主要留在 Ticket。需要人决定时，Worker 必须使用结构化 <code>human_action</code>，主 Session 将问题转回目标消息或最初会话。这样不会靠模型输出里有没有“请确认”来猜测任务是否受阻。<a href="#D13">[D13]</a></p></section>
+
+<section id="authorization"><h2>5. 授权与主动性：上下文可以广，授权必须窄</h2>
+<p><span class="tag">已实现</span>Gate 先检查来源身份、allowed list、是否直接指向 Bot、来源 admission table 与 Bot 列表；模型再判断内容含义和规则匹配。明确请求与推断候选是两类强度。不能把“系统读到了消息”理解为“这人授权了所有可调用工具”。<a href="#D12">[D12]</a></p>
+<table><thead><tr><th>模式</th><th>推断型请求</th><th>明确授权请求</th></tr></thead><tbody><tr><td>off</td><td>不进入推断候选处理。</td><td>仍可正常处理。</td></tr><tr><td>observe（默认）</td><td>评估并记录 would accept，实际不接单。</td><td>仍可正常处理。</td></tr><tr><td>auto</td><td>匹配至少一条启用规则后可接单。</td><td>仍可正常处理。</td></tr></tbody></table>
+<p>Mandate 是不可变的授权依据。扩展范围原则上需要新 Ticket；Policy 变更使过时 Eval 重新排队，对相关运行任务投递变更通知，并不一律立即杀掉任务。已结束 Ticket 恢复前重新校验授权是否仍成立。不同 Source 的身份不做硬编码统一账号映射，团队可用 skills 说明人物关系，但这不会自动变成权限合并。<a href="#D12">[D12]</a> <a href="#D13">[D13]</a></p>
+<div class="callout proposal"><strong>对 DeepBot 的建议：</strong>将 <code>contextScope</code>、<code>actionScope</code>、<code>replyScope</code> 分开存储和检查。群里有人贴出“忽略先前规则”的文本，可以作为资料进入上下文，但无权改变 actionScope。</div></section>
+
+<section id="runtime"><h2>6. 运行时：低延迟 Router 与有状态 Worker</h2>
+<h3>6.1 Router 不做慢工作</h3>
+<p><span class="tag">已实现</span>主 Session 负责接受、关联、拒绝、停止与协调，技术实现交给 Worker。Router shell / job 等待默认短返回，并对 sleep、过长 shell timeout 和 job wait 有额外限制；主 Session 应尽快结束空闲轮次，由候选、报告和结果消息再次唤醒。<a href="#D13">[D13]</a> <a href="#D14">[D14]</a></p>
+<p><span class="tag">推断</span>这样控制的是调度层被长命令堵住的风险。它不意味着模型具有真正的并行认知；并发来自多个 Session 与可调度的 Inbox。</p>
+<h3>6.2 每个 Ticket 一份执行状态</h3>
+<p>Worker Session ID 由 Ticket 推导，工作目录默认在 <code>&lt;stateDir&gt;/work</code> 下。prepare command 通常创建 git worktree，首次目录缺失才运行，超时上限 10 分钟；没有配置 prepare 时就是空目录。Worker 使用专门 preset，普通长命令 5 秒后转后台以便下一个步骤接收补充消息。<a href="#D10">[D10]</a> <a href="#D15">[D15]</a></p>
+<p>并发额度覆盖启动准备、激活 turn 和后台任务，不只是模型 HTTP 请求数。普通并发之外还有一个供人的消息或状态请求使用的额外槽，且唤醒优先于新任务启动。轮次结束但后台 shell / subagent 仍忙时保持槽位；交给人 review、回答问题或报告阻塞时可释放槽。<a href="#D10">[D10]</a> <a href="#D15">[D15]</a></p>
+<h3>6.3 两套状态不能混为一谈</h3>
+<table><thead><tr><th>状态层</th><th>示例</th><th>表达什么</th></tr></thead><tbody><tr><td>Ticket</td><td>open / ended；可在授权有效时恢复。</td><td>工作是否仍存在。</td></tr><tr><td>Assignment</td><td>pending → running → ended。</td><td>这次执行绑定的寿命。</td></tr><tr><td>派生工作阶段</td><td>working / queued、idle、person / answer、person / review、person / blocked、person / failed、person / delivery。</td><td>此刻在等谁、为什么未推进。</td></tr><tr><td>报告</td><td>progress、waiting、ready、blocked、failed、dropped。</td><td>Worker 明确回报的工作事实。</td></tr></tbody></table>
+<p>没有 PR 的 ready 可完成 Ticket；有 PR 的 ready 进入等待 review，结束要看跟踪的 PR 关闭/合并规则及后续工作是否处理完。一次模型 turn 结束也可能只是等待下一条 Trigger。<a href="#D10">[D10]</a></p>
+<h3>6.4 真实的隔离边界</h3>
+<p>目录和 Session 分离减少上下文串扰与代码冲突，但两个 preset 都以当前 OS 用户的 <code>danger-full-access</code> 运行。账号 wrapper 和 blocked command 只是默认路由，绝对路径执行仍可能绕过，源码文档也明确不把它们当安全边界。专门 OS 用户、容器或隔离主机属于额外部署选择。<a href="#D16">[D16]</a></p></section>
+
+<section id="context"><h2>7. 上下文共享：结构化引用与定向投递</h2>
+<p><span class="tag">已实现</span>共享的基础是持久对象之间的关系：Trigger 属于 Thread，Ticket 订阅 Thread，Assignment 属于 Ticket，Report 与 Input 指向具体工作。Router 读任务卡片即可知道全局概况；Worker 读自己的原始输入与任务资料完成工作，不必把所有 Worker 的完整上下文拼成一个超级 prompt。<a href="#D6">[D6]</a> <a href="#D17">[D17]</a></p>
+<h3>7.1 小内容内联，大内容保留指针</h3>
+<p><code>cards.ts</code> 生成受限卡片，包含 preview、完整字符数、对象 ID 与 read 路径；<code>orchestrator_read</code> 按 resource 与 offset 分页读取原文、报告、历史和源平台资料。默认文本页约 4,000 个 UTF-16 code units，列表默认 20 项、最大 50 项。引用关系是业务对象图，不是另建了一套向量数据库。<a href="#D17">[D17]</a> <a href="#D18">[D18]</a></p>
+<h3>7.2 三条跨任务信息路径</h3>
+<ol><li><strong>订阅：</strong>Thread 新 Trigger 定向进入订阅 Ticket 的 Inputs，活跃任务可持续接收 review 与 CI。</li><li><strong>显式关联：</strong>主 Session attach 需要消息明确指向某项工作，单纯主题相似不够，避免把整个群话题错误并入旧任务。</li><li><strong>简短事实转交：</strong>主 Session 用 ticket note 给另一个任务事实，默认长度受限，且不授予权限。</li></ol>
+<p>应用工具对 Worker 的读取范围做检查：只能读取自己有权接触的 Trigger / Thread / Ticket 资源；共享 Thread 的读取不会连带开放其他 Ticket 的内部详情和 Decision。这个应用层边界仍不能替代前述 OS 隔离。<a href="#D17">[D17]</a></p>
+<h3>7.3 “送进 Inbox”还不等于模型已经读过</h3>
+<p><code>AgentDelivery</code> 将稳定 request ID 转为稳定 MessageId，对 live events、持久历史、nextTurn 和 nextStep inbox 查重；确认前 flush session persistence。领域层另记录 input delivered、进入 session history、后续 report / turn end 等事实，区分“已排队但未读”和“已消费”。重试 Assignment 会重送未消费输入，并清理残留等待副本。<a href="#D19">[D19]</a> <a href="#D10">[D10]</a></p>
+<p><span class="tag">建议</span>这是 DeepBot 最值得补上的协议细节：不能只用“写入 stdin 成功”作为 Agent 已处理消息的证据。</p></section>
+
+<section id="memory"><h2>8. 记忆设计：有可恢复状态，但没有完整长期记忆子系统</h2>
+<table><thead><tr><th>层次</th><th>本原型已经具备</th><th>尚不能据此声称</th></tr></thead><tbody><tr><td>任务事件记忆</td><td>Trigger、Decision、Mandate、Inputs、Reports、Assignments 等持久台账。</td><td>自动提炼跨项目通用经验。</td></tr><tr><td>工作会话记忆</td><td>DSH Session 历史、可续用会话、按 Ticket 读取 transcript。</td><td>插件实现了独立完整的压缩与向量召回系统。</td></tr><tr><td>团队知识</td><td>版本化 prompts 与按需 skills，包含身份说明、流程和交付要求。</td><td>每次任务后自动学习并合并知识。</td></tr><tr><td>按需回忆</td><td>ID 引用、卡片、分页资源、源平台原文读取。</td><td>全局语义检索、置信度管理和自动过期。</td></tr><tr><td>运行缓存</td><td>有界 TextCache、部分标签与读分页缓存。</td><td>持久记忆；重启会丢，分页可能要从 0 重新读。</td></tr></tbody></table>
+<p><span class="tag">已实现</span><code>src/core/memory.ts</code> 的 <code>MemoryRepositories</code> 是用于测试与临时 Engine 的内存 Map 仓储，支持 rollback；它不是 Agent 的长期记忆模块。公开原型的独立持久表与工具中，未发现 OpenBot 那种专门的 remember / forget / essential / searchable 事实记忆流程。<a href="#D20">[D20]</a> <a href="#D21">[D21]</a></p>
+<p>prompts 在每次模型请求重新组合，保存时用 base revision 防冲突，每次保存产生不可变版本。Policy 放在末尾，以免策略变更使前面稳定文本改变；Worker 还读 DSH coding prompt 与仓库 AGENTS.md。这些是配置与知识供应机制，不应与模型自主长期学习画等号。<a href="#D13">[D13]</a></p>
+<p><span class="tag">推断</span>其强项是“记住这项工作为什么开始、现在怎样、去哪里找证据”；弱项是“运行数月后提炼哪些稳定知识、忘掉什么、如何跨任务安全复用”。本次未找到独立语义 Watchdog、分布式迁移调度或全局向量记忆的实现，不能从设计文章标题推导这些能力已在该插件交付。</p>
+<div class="callout proposal"><strong>建议的互补关系：</strong>用 DSH 风格的任务台账负责可追溯与恢复，用 OpenBot 风格的事实记忆负责长期偏好和经验；所有摘要、记忆和检索结果都保留可回到原事件的证据引用。</div></section>
+
+<section id="recovery"><h2>9. 持久化与恢复：事务决定状态，副作用队列推进世界</h2>
+<h3>9.1 核心存储</h3>
+<p><span class="tag">已实现</span>Runtime 锁住 stateDir 后打开 <code>orchestrator.sqlite</code>，避免多个进程同时迁移和写入。主要表包括 trigger、disposition、trigger_thread、thread、ticket、decision、effect、outbox、kv；活动集合用生成列与索引读取。DSH Session 历史属于宿主持久化，并不全部塞进同一业务数据库。<a href="#D4">[D4]</a> <a href="#D21">[D21]</a></p>
+<table><thead><tr><th>Effect 类型</th><th>作用</th><th>恢复行为</th></tr></thead><tbody><tr><td>assessment</td><td>将候选送入主 Session。</td><td>投递成功才开始 Eval 截止时间。</td></tr><tr><td>launch</td><td>准备并启动 Assignment。</td><td>无槽位则延后；瞬时失败有界重试，其他失败记录到 Ticket。</td></tr><tr><td>delivery</td><td>向 Worker 投递 Inputs。</td><td>退避重试，单独显示未送达问题。</td></tr><tr><td>relay / notice</td><td>回传报告或不唤醒式通知。</td><td>各自保序，失败阻挡后续同类消息。</td></tr><tr><td>reply</td><td>向外部 Channel 发消息。</td><td>Outbox receipt 与持久 effect 一起写入，再异步发送。</td></tr></tbody></table>
+<p>副作用键由 kind / key 唯一标识；当同一待执行键再次入队，会替换 payload 而保留排序。后续实现必须明确 key 是“一次命令的 ID”还是“可合并状态的 ID”，否则可能把真实的新变更误当重试。<a href="#D22">[D22]</a></p>
+<h3>9.2 外部消息去重落实到平台</h3>
+<p>飞书发送携带 <code>--idempotency-key message.id</code>；GitHub 评论嵌入稳定隐藏标记，重试前检索自己已发的评论。Outbox 保存 pending / sent / dropped 回执。相同 Ticket 同一会话的消息正常保序，但前一条连续失败达到阈值后不再无限阻塞后面消息，属于有例外的保序。<a href="#D11">[D11]</a> <a href="#D23">[D23]</a> <a href="#D24">[D24]</a></p>
+<p><span class="tag">推断</span>这是可靠重试＋幂等补偿；不能扩展宣称为所有工具、所有平台的分布式 exactly-once。尤其 GitHub 的“先查标记再发”依赖单实例调度与平台可见性，任意 shell 外部操作更需要恢复前检查真实状态。</p>
+<h3>9.3 重启、暂停、失败</h3>
+<ul><li><strong>重启：</strong>忙碌 Assignment 结束并建立新 Assignment，保留 Ticket、目录、分支、Session 和待处理 Inputs，恢复提示要求先检查 Git、目录和 GitHub 再重复外部操作。</li><li><strong>已阻塞 / 失败：</strong>自动 CI 和 Bot 输入继续记录，但暂停自动唤醒；人的新消息或显式 retry 可解除。</li><li><strong>处理暂停：</strong>停止新评估、派工、输入投递与回复；Source 仍接收记录，运行中的 turn 不强制中断。</li><li><strong>输入与回复失败：</strong>分别可见，退避重试；永久不存在的目标记录为 dropped，不能伪装为 sent。</li><li><strong>积累数据：</strong>文档明确旧 Trigger、Decision、Ticket、回执、配置版本尚无清理，长期会增长；生产化需要 retention 与归档策略。</li></ul><p class="evidence">依据：<a href="#D10">[D10]</a> <a href="#D21">[D21]</a>。可靠性的边界是“状态可查、工作可恢复”，不是“重启完全没有行为差异”。</p></section>
+
+<section id="comparison"><h2>10. 两个项目的设计取舍</h2>
+<table><thead><tr><th>维度</th><th>OpenBot</th><th>DSH Superagent 原型</th><th>DeepBot 建议</th></tr></thead><tbody>
+<tr><td>产品中心</td><td>长期 Bot 与协作工作区。</td><td>跨来源的授权 Ticket。</td><td>Bot 做身份，Ticket 做工作。</td></tr>
+<tr><td>协调机制</td><td>群聊 lead、任务派发、同伴消息。</td><td>主 Router、新工作评估、订阅直达 Worker。</td><td>新任务路由，既有任务确定性关联。</td></tr>
+<tr><td>运行底座</td><td>多个 Provider 原生会话适配。</td><td>DSH 宿主 Session、Inbox 与工具。</td><td>保持 Pi Durable，先抽 RuntimeAdapter。</td></tr>
+<tr><td>权限核心</td><td>主机与 Bot 权限、工具审批、线程读边界。</td><td>Source Policy、Gate、Mandate、资源权限。</td><td>授权范围持久化，工具执行前硬检查。</td></tr>
+<tr><td>上下文</td><td>线程隔离、群聊摘要与增量、跨会话历史工具。</td><td>关系引用、卡片、订阅 Inputs、分页回读。</td><td>摘要＋引用图＋受限检索。</td></tr>
+<tr><td>长期记忆</td><td>事实记忆分层与 review 已实现。</td><td>主要是任务台账、会话历史与团队 skills。</td><td>任务事实与长期记忆分库表、同证据 ID。</td></tr>
+<tr><td>恢复</td><td>持久 mailbox、绑定恢复、Provider handoff。</td><td>事务 Engine、durable effects、Outbox、Assignment 重建。</td><td>业务恢复先于模型恢复；副作用单独幂等。</td></tr>
+<tr><td>主要边界</td><td>平台差异、多 Provider 行为、共享主机权限。</td><td>单仓库、全权限 Worker、无长期数据清理。</td><td>先做好单主机可信场景，再扩展租户和跨机。</td></tr>
+</tbody></table><p class="evidence">OpenBot 依据见<a href="01-openbot-research-zh.html#sources">第一份报告的固定提交源码索引</a>；DSH 依据见本报告。此表是定性架构比较，不是性能排名或实测优劣评分。</p></section>
+
+<section id="deepbot"><h2>11. 面向 DeepBot 的整体架构设计</h2>
+<p><span class="tag">建议</span>以下是组合设计，不是两个项目中任何一个的现成实现。目标是：一个 Bot 可以拥有多项进行中的工作，用户从桌面或 IM 都能自然继续，任务和记忆边界可解释，进程重启后能够查证并恢复。</p>
+<h3>11.1 与当前工程的接点</h3>
+<p><span class="tag">本地已核验</span>当前 <code>packages/agent/src/main.ts</code> 打开 Pi Durable SQLite、创建一个 root、调用 resume，再向桌面推送 snapshot；stdin 协议只有 input 与 abort，requestId 可选，尚无 botId / threadId / taskId。桌面是 NSH / QuickJS，经 Rust 与 Node sidecar 用 JSON-lines 通信。因此可沿用这条边界，把业务控制面放在 Node 侧；不需要将 NSH 当成 React 浏览器，也不需要为调研改动 UI。<a href="/home/swj/project/deepbot/packages/agent/src/main.ts">[本地 main.ts]</a> <a href="/home/swj/project/deepbot/packages/agent/src/protocol.ts">[本地 protocol.ts]</a></p>
+<div class="diagram" role="img" aria-label="建议的 DeepBot 组合架构"><div class="grid"><div class="node"><strong>NSH 桌面</strong>消息、任务、记忆、人工待办</div><div class="node"><strong>IM 适配器</strong>飞书优先；后续可加其他平台</div><div class="node"><strong>事件适配器</strong>定时、Webhook、GitHub</div></div><div class="arrow">↓</div><div class="rail"><strong>Ingress → Durable Inbox → Identity / Policy Gate → Task Router</strong><br>验签与身份 → 持久收件 → 权限范围 → 关联或新建任务</div><div class="arrow">↓</div><div class="grid"><div class="node"><strong>Bot Registry</strong>人格、目录、工具、技能、模型</div><div class="node"><strong>Task Engine</strong>Mandate、订阅、状态机、调度槽</div><div class="node"><strong>Context Builder</strong>范围过滤、原文、摘要、记忆</div></div><div class="arrow">↓</div><div class="rail"><strong>RuntimeAdapter → Pi Durable 执行会话</strong><br>start / steer / cancel / resume / events；长命令与人工等待不堵路由</div><div class="arrow">↓</div><div class="grid"><div class="node"><strong>执行工具</strong>能力校验、工作目录、外部副作用记录</div><div class="node"><strong>事件与投影</strong>任务进度、证据、模型用量</div><div class="node"><strong>Durable Outbox</strong>状态 / 问题 / 结果 / 文件，回原渠道</div></div><div class="arrow">↕</div><div class="rail"><strong>SQLite 业务状态 + Session 存储 + Artifact Store + Memory Store</strong><br>单独的恢复协调器与进程 supervisor；UI 仅消费投影</div></div>
+<h3>11.2 最小领域数据模型</h3>
+<table><thead><tr><th>记录</th><th>必要字段 / 不变量</th></tr></thead><tbody><tr><td>BotProfile</td><td>botId、role、workspace、modelBinding、toolPolicy、instructionRevision；身份不能绑定一次进程 PID。</td></tr><tr><td>MessageEvent</td><td>eventId、source、sourceAccountId、externalMessageId、actor、conversationId、replyTo、body / attachment refs、sourceTime、receivedAt；组合唯一键去重。</td></tr><tr><td>Task / Mandate</td><td>taskId、botId、origin、objective、scope、policyRevision、requester、state、revision；业务授权独立于 prompt。</td></tr><tr><td>TaskSubscription</td><td>taskId、sourceThreadId、mode（follow-up / context-only）、cursor；关联和可见范围明确。</td></tr><tr><td>Run / Assignment</td><td>runId、taskId、attempt、sessionRef、workspaceRef、state、lease / heartbeat、startedAt；多个尝试属于同一任务。</td></tr><tr><td>TaskInput</td><td>inputId、taskId、eventId、deliveryState、consumedAt、消费证据；delivery 与 consumed 分离。</td></tr><tr><td>Effect / Outbox</td><td>operationId、kind、target、payloadRef、attempts、nextAttemptAt、receipt；事务提交后执行。</td></tr><tr><td>MemoryFact</td><td>memoryId、ownerScope、text、evidenceRefs、origin、inclusion、revision、validFrom / expiresAt、supersedes；能纠错和删除。</td></tr><tr><td>Artifact</td><td>artifactId、taskId、path / objectKey、hash、mime、权限；消息引用产物，不依赖短期临时文件。</td></tr></tbody></table>
+<h3>11.3 运行契约与 IM 协议</h3>
+<pre>命令（建议）：
+message.submit { requestId, botId, threadId, content, replyTo, attachments }
+task.steer     { requestId, taskId, expectedRevision, content }
+task.cancel    { requestId, taskId, expectedRevision, reason }
+attention.reply{ requestId, attentionId, actorId, value }
+
+事件（建议）：
+message.accepted / task.queued / run.started / run.delta
+tool.started / tool.finished / attention.required
+run.finished / task.stateChanged / outbox.delivered / outbox.failed
+
+公共字段：eventId、sequence、botId、threadId、taskId、runId、timestamp
+恢复：snapshot + afterSequence 增量；consumer 可检测断点并补读</pre>
+<p>已有 requestId 可以升级为强制幂等键；abort 应升级为带 taskId / runId 的定向取消。不能让切换到另一 Bot 后的旧停止按钮误停新工作。外部 connector 只认业务 API，不直接操纵 Pi Durable 的某个 root。</p>
+<h3>11.4 上下文组装顺序</h3>
+<ol><li>宿主硬规则与能力约束（代码执行，不能仅靠 prompt）。</li><li>Bot 指令、任务 Mandate 和明确目标。</li><li>本任务已核验状态、未解决问题、最新用户补充。</li><li>允许范围内的 essential 记忆和选中的 skills。</li><li>相关历史摘要＋最新原文＋证据指针。</li><li>检索所得材料与工具结果，明确标注来源为数据。</li></ol>
+<p>Context Builder 先做 ACL 与 scope 过滤，再做相关性排序和预算裁剪。不要先全库向量检索再指望模型自觉不使用私人命中项；摘要必须保留原文 ID，用户纠正之后使旧摘要失效或重建。</p>
+<h3>11.5 记忆闭环</h3>
+<pre>任务事件 / 用户明确纠正
+  → 候选事实（附来源，不直接成为权威）
+  → 去重、冲突检查、作用域与敏感字段检查
+  → 成功提交 / 用户采纳
+  → essential 或 searchable
+  → 任务检索时过滤权限、时效、冲突版本
+  → 使用后保留命中与证据记录
+  → 用户纠正、过期、替代、删除及索引清理</pre>
+<p>首版可用 SQLite 文本检索，但必须用中文句子、别名、长短词做召回验证；是否加 embedding 应由真实命中率决定。摘要、对话历史、稳定偏好和任务结论分别管理。未验证的模型猜测不应自动晋升成 essential；跨 Bot 提升为 shared 记忆应有明确规则或人工确认。</p>
+<h3>11.6 持续在线与安全边界</h3>
+<p>当前侧车在 stdin 关闭时退出，生命周期跟随桌面宿主；这能支撑本机桌面使用，但关闭桌面或机器休眠后不能继续收 IM。若目标是常在线 Bot，应让一个独立本地 daemon / 服务成为唯一执行宿主，桌面通过受鉴权 IPC 连接；再考虑远程部署。进程 supervisor 负责进程存活，Task Engine 负责恢复，业务进度检测负责“活着但没推进”，三者分工。</p>
+<p>多租户或接入不可信群聊前，需要独立执行账号/容器、文件根目录与工具 capability 白名单、出站目标限制。个人可信 MVP 可先保留单用户主机结构，但仍要区分“能读哪些上下文”和“能执行哪些动作”。</p></section>
+
+<section id="roadmap"><h2>12. 实施顺序与可核验的验收标准</h2>
+<table><thead><tr><th>阶段</th><th>建设内容</th><th>验收门槛</th></tr></thead><tbody>
+<tr><td>P0：单 Bot 持久闭环</td><td>必填 requestId，Inbox / Outbox，task / run IDs，状态事件与重启恢复。</td><td>同一消息重试只开一项任务；在入队、执行、结果回送三处崩溃不丢任务归属；未知外部结果能核查。</td></tr>
+<tr><td>P1：多 Bot 与独立任务</td><td>BotProfile、RuntimeAdapter、任务队列、并发槽、定向 steer / cancel。</td><td>两项任务并行时不串消息；停止 A 不影响 B；人的补充不会永远排在新任务之后。</td></tr>
+<tr><td>P2：首个 IM 来源</td><td>飞书 Source、actor Gate、Thread 关联、订阅、人工问题与原路回送。</td><td>群聊 @、私聊、回复链、Bot 自身消息、离线重连和撤回原消息均有可解释结果。</td></tr>
+<tr><td>P3：记忆与上下文</td><td>记忆作用域、essential / searchable、摘要指针、历史回读、纠正与删除。</td><td>跨用户私有记忆不可读；失败任务不写成功结论；清空后在途写入不复活；中文召回达到预先定义的目标。</td></tr>
+<tr><td>P4：主动事件与常在线</td><td>observe / auto 策略、定时来源、后台服务、健康与业务进度检查。</td><td>observe 零执行副作用；auto 必须命中规则；源故障可见；关闭桌面后服务持续并正确回送。</td></tr>
+</tbody></table>
+<h3>必须纳入测试的故障矩阵</h3>
+<ul><li>重复 / 乱序 / 编辑消息；同一外部 ID 在不同账号下不误碰撞。</li><li>用户在旧 Thread 开新工作、显式引用旧任务、仅语义相似但实际无关，三者正确区分。</li><li>Router 忙、Worker 忙、后台工具忙、等待人工，均允许精确停止和保留补充消息。</li><li>Policy 在 Eval 期间变化；已结束任务恢复时授权已撤销。</li><li>模型超时、429、工具成功但响应丢失、外部已发消息但本地未记 receipt。</li><li>摘要遗漏条件、长期记忆冲突、中文检索漏召回、手动清空与后台 review 同时发生。</li><li>会话恢复成功但业务尚未完成；PR 已创建但未审查；结果已生成但 IM 回送失败。</li></ul>
+<p>建议持续观察接收至落库延迟、排队时长、任务完成率、重复外部动作数、回送失败率、待人工时长、每任务模型成本、记忆纠正率与检索命中率。这里没有编造实测数据或预设两个项目的性能高低。</p></section>
+
+<section id="sources"><h2>13. 固定提交源码索引与证据边界</h2><ol class="small"><li id="D1"><strong>[D1] 项目定位与研究原型声明</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/README.md">README.md</a></li><li id="D2"><strong>[D2] 减少人类注意力开销的原则</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/000-philosophy.md">docs/000-philosophy.md</a></li><li id="D3"><strong>[D3] Bundle、主插件、来源插件与执行 presets</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/cordis.patch.yml">cordis.patch.yml</a></li><li id="D4"><strong>[D4] Runtime、Engine、端口、Effects 与持久化架构</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/007-architecture.md">docs/007-architecture.md</a></li><li id="D5"><strong>[D5] 领域命令入口及事务边界</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/core/engine.ts">src/core/engine.ts</a></li><li id="D6"><strong>[D6] Source / Thread / Ticket / Mandate / Subscription 领域模型</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/001-domain.md">docs/001-domain.md</a></li><li id="D7"><strong>[D7] 飞书实时事件、重连、历史补读与游标</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/sources/feishu-loops.ts">src/sources/feishu-loops.ts</a></li><li id="D8"><strong>[D8] 飞书消息归一化、身份与线程映射</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/sources/feishu-trigger.ts">src/sources/feishu-trigger.ts</a></li><li id="D9"><strong>[D9] GitHub Source 实现</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/sources/github.ts">src/sources/github.ts</a></li><li id="D10"><strong>[D10] 运行阶段、Worker slots、重启、失败与交付</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/003-execution.md">docs/003-execution.md</a></li><li id="D11"><strong>[D11] Outbox 事务、发送状态与有条件保序</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/app/outbox.ts">src/app/outbox.ts</a></li><li id="D12"><strong>[D12] Gate、主动模式、授权、订阅及恢复校验</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/002-authorization.md">docs/002-authorization.md</a></li><li id="D13"><strong>[D13] Prompt 组成、工具分工、人工问题与配置版本</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/004-prompts.md">docs/004-prompts.md</a></li><li id="D14"><strong>[D14] 主 Session、presets、等待限制与消息注入</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/app/sessions.ts">src/app/sessions.ts</a></li><li id="D15"><strong>[D15] DshExecutor、worker 生命周期与槽位</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/executor/dsh.ts">src/executor/dsh.ts</a></li><li id="D16"><strong>[D16] 部署、宿主依赖与权限隔离边界</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/006-deployment.md">docs/006-deployment.md</a></li><li id="D17"><strong>[D17] 资源读取、分页与 Worker 访问范围</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/app/resources.ts">src/app/resources.ts</a></li><li id="D18"><strong>[D18] 结构化卡片、对象引用与文本分页</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/app/cards.ts">src/app/cards.ts</a></li><li id="D19"><strong>[D19] AgentDelivery、稳定 ID、Inbox 与历史查重</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/app/delivery.ts">src/app/delivery.ts</a></li><li id="D20"><strong>[D20] 测试用 MemoryRepositories；并非长期记忆系统</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/core/memory.ts">src/core/memory.ts</a></li><li id="D21"><strong>[D21] SQLite 结构、版本、事务与索引</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/app/store.ts">src/app/store.ts</a></li><li id="D22"><strong>[D22] 持久副作用队列及去重键</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/app/effects.ts">src/app/effects.ts</a></li><li id="D23"><strong>[D23] GitHub 隐藏标记去重与评论回送</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/sources/github-channel.ts">src/sources/github-channel.ts</a></li><li id="D24"><strong>[D24] 飞书原话题回复与平台幂等键</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/src/sources/feishu-channel.ts">src/sources/feishu-channel.ts</a></li><li id="D25"><strong>[D25] 插件版本、宿主兼容范围与构建声明</strong><br><a href="https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/package.json">package.json</a></li></ol><p class="meta">调研读取了官方 README、领域/授权/执行/架构文档及列出的核心源码。测试目录包含 domain、delivery、outbox、runtime-concurrency、followups 等测试，但本次没有安装其依赖或执行这些测试，也没有把测试存在当成真实平台验收通过。DeepBot 当前状态只依据本次本地读取的 main.ts、protocol.ts 与 README；未推断未读模块的功能。</p></section>
+<footer>本文将公开原型、架构推断、DeepBot 目标设计分别标明。两份报告建议合用：OpenBot 提供持久 Bot 与记忆模型，DSH 提供消息到授权任务的控制流程。</footer>
+</main></body></html>
