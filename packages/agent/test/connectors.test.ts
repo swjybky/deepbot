@@ -70,7 +70,9 @@ test("LAN T3 dispatch pairs without an approval credential and checks identity b
   assert.deepEqual(fixture.state.approvals, ["full-access"]);
   const connector = remoteT3Connector(directory, config);
   await connector.validateRemote(signal);
-  assert.equal((await connector.status()).t3?.approvalAvailable, false);
+  const status = await connector.status();
+  assert.equal(status.t3?.approvalAvailable, false);
+  assert.equal(status.t3?.desktopLocal, false);
   fixture.state.environmentId = "different-environment";
   const before = requests.mock.callCount();
   await assert.rejects(connector.validateRemote(signal), /与已配对的电脑不匹配/);
@@ -316,7 +318,7 @@ test("T3 reports the old connection's ceiling and requires a grant for full-acce
  const {directory,brief}=setup();
  const fixture=await startT3Fixture({root:directory,initialAccess:"approval-required"});t.after(()=>fixture.close());
  const connector=new T3CodeConnector({dataDir:directory,url:fixture.url,token:"secret"});t.after(()=>connector.close());
- assert.deepEqual((await connector.status()).t3,{runtimeMode:"full-access",grantedMode:"approval-required",approvalAvailable:false});
+ assert.deepEqual((await connector.status()).t3,{runtimeMode:"full-access",grantedMode:"approval-required",approvalAvailable:false,desktopLocal:true});
  await assert.rejects(connector.start({assignmentId:"full",brief}),/无法使用完全访问模式/);
  await connector.start({assignmentId:"supervised",brief:{...brief,t3RequireApproval:true}});
  assert.equal(fixture.state.threads[0]?.thread.runtimeMode,"approval-required");

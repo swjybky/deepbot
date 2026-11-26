@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readdir, rm, stat, truncate, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { startConnectorProcess } from "../src/connectors/support.ts";
 import { defaultSettings } from "../src/defaults.ts";
 import { pathInRoots } from "../src/policy/gate.ts";
-import { hashArtifactFile, previewArtifactFile } from "../src/runtime/artifact-files.ts";
+import { hashArtifactFile, openArtifactFile, previewArtifactFile } from "../src/runtime/artifact-files.ts";
 import { readHttpText, requestHttp } from "../src/runtime/http.ts";
 import { readJson, writePrivateJson } from "../src/runtime/private-json.ts";
 import { processStatus, staleProcessLock } from "../src/runtime/process-id.ts";
@@ -79,6 +79,37 @@ test("a supported file name starting with two dots stays inside its root", async
   t.after(() => rm(directory, { recursive: true, force: true }));
   assert.equal(await pathInRoots("..draft.txt", directory, [directory]), join(directory, "..draft.txt"));
   await assert.rejects(pathInRoots("../draft.txt", directory, [directory]), /路径不在/);
+});
+
+test("Linux file open reports the launcher's result", { skip: process.platform !== "linux" }, async t => {
+  const directory = await mkdtemp(join(tmpdir(), "deepbot-file-opener-"));
+  const previousPath = process.env.PATH;
+  t.after(async () => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    await rm(directory, { recursive: true, force: true });
+  });
+  const context = { cwd: directory, roots: [directory], settings: defaultSettings() };
+  const path = join(directory, "交付 报告.md");
+  const gio = join(directory, "gio");
+  const xdg = join(directory, "xdg-open");
+  await writeFile(path, "report");
+  await writeFile(gio, "#!/bin/sh\nexit 4\n", { mode: 0o700 });
+  await writeFile(xdg, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  process.env.PATH = directory;
+  await assert.rejects(openArtifactFile(context, path), /系统打开文件失败，请检查默认应用/);
+
+  await writeFile(gio, '#!/bin/sh\nprintf "%s\\n" "$@" > "$2.args"\n');
+  await openArtifactFile(context, path);
+  assert.equal(await readFile(path + ".args", "utf8"), `open\n${path}\n`);
+
+  const fallback = join(directory, "fallback");
+  await mkdir(fallback);
+  process.env.PATH = fallback;
+  await assert.rejects(openArtifactFile(context, path), /找不到系统文件打开器/);
+  await writeFile(join(fallback, "xdg-open"), '#!/bin/sh\nprintf "%s\\n" "$@" > "$1.args"\n', { mode: 0o700 });
+  await openArtifactFile(context, path);
+  assert.equal(await readFile(path + ".args", "utf8"), `${path}\n`);
 });
 
 test("file previews preserve UTF-8 and distinguish truncation from invalid text", async t => {

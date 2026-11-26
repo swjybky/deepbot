@@ -387,6 +387,12 @@ function fixtureReply(input) {
     user?.content?.filter(part => part.type === 'text').map(part => part.text).join(' ')) ?? '';
   const hasTool = name => input.tools?.some(entry => entry.function?.name === name);
   const previous = last?.role === 'tool' ? input.messages.at(-2)?.tool_calls?.[0]?.function : undefined;
+  if (/"text":"DEEPBOT_VERIFY_FOREGROUND_TURNS [12]"/.test(prompt) && hasTool('say')) {
+    const rounds = previous?.name === 'say' ? Number(JSON.parse(previous.arguments).text.split(' ').at(-1)) : 0;
+    return rounds < 10
+      ? { ...fixtureCall('say', { text: `验证工具轮次 ${rounds + 1}` }), before: rounds === 0 ? 5500 : rounds === 1 ? 3500 : 0 }
+      : { delta: { content: '前台十轮工具均已完成' }, finish: 'stop' };
+  }
   if (prompt.includes('DEEPBOT_VERIFY_CHAT_FAILURE') && last?.role === 'user') return { failure: true };
   if (prompt.includes(activityBackgroundGoal) && !hasTool('work_start')) {
     return { delta: { content: '后台步骤已完成' }, finish: 'stop', before: 14000 };

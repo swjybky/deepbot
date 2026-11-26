@@ -1,6 +1,12 @@
 import type { ExecutorSettings, Settings, Snapshot } from "./protocol.ts";
 
 export const DEFAULT_BOT_MAX_CONCURRENT = 10;
+export const DEFAULT_FOREGROUND_MAX_TURNS = 24;
+export const FOREGROUND_MAX_TURNS_LIMIT = 32;
+
+export function isForegroundMaxTurns(value: number): boolean {
+  return Number.isInteger(value) && value >= 1 && value <= FOREGROUND_MAX_TURNS_LIMIT;
+}
 
 export const defaultExecutor = (): ExecutorSettings => ({
   thinkingLevel: "medium",
@@ -14,7 +20,7 @@ export const defaultSettings = (): Settings => ({
   executor: defaultExecutor(),
   connectedFolders: [],
   debounceMs: 1200,
-  foregroundMaxTurns: 8,
+  foregroundMaxTurns: DEFAULT_FOREGROUND_MAX_TURNS,
   maxConcurrent: 3,
 });
 

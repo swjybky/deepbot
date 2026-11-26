@@ -22,6 +22,7 @@
 5. 点事项卡片，弹出「事项详情」（`id:work-detail-dialog`，`modal = "workDetail"`），内容包括：
    - 目标和验收标准；
    - 派活对象：未结束的事项可以在这里改派；
+   - T3 Code 中需要手动处理的请求：点「打开 T3 Code」定位原派工线程。桌面不可用时会提示原因，有网页链接时可另点「在浏览器打开」；
    - 目录、进度、Bot 已代批的操作；
    - 产物：点开可预览，点「返回事项」回到详情。
 6. 未结束的事项，标题栏右侧有「停止事项」按钮（`id:cancel-work-<workId>`）。
@@ -69,6 +70,7 @@ pnpm --silent verify env stop --run "$R"   # 用完停止实例。不再需要�
 ## 5. 注意事项
 
 - **远端 T3 Code**：使用所选执行器 ID 调用 `work_projects`，将项目 ID 和同一执行器 ID 传给 `work_start` 或 `work_reassign`。项目 ID 可跨电脑路径差异，派工时在该实例的项目列表查验。事项详情改派到远端 T3 Code 时，从所选实例读取项目，选中项目后提交改派。配置修改、断线、重启后的进度、补发、停止和审批都按原派工的实例 ID 路由。
+- **打开原 T3 线程**：事项详情和聊天共享 [T3 跳转按钮](../../apps/desktop/ui/components/T3ThreadButtons.tsx)。[路由逻辑](../../apps/desktop/ui/state/t3-thread.ts) 按请求的派工 ID 查 `sessionRef`，核对 T3 回执里的线程 ID，再把原环境和线程 ID 交给已注册的 T3 Code 协议。Linux [原生启动器](../../apps/desktop/src/t3_link.rs) 用 GIO 调用协议处理器，避免 GTK 的通用链接打开接口弹出应用选择器。连接快照的 `t3.desktopLocal` 只标记内置回环连接。旧派工继续读原有回执，旧后台快照缺少该字段时按无法确认桌面连接处理。远端执行器缺少本机桌面连接的确认时提供原网页入口。标准 `work-flow` 场景检查事项详情，共用跳转回归见 [T3 跳转测试](../../apps/desktop/tests/t3-thread-link.test.tsx)，系统协议和窗口定位须用隔离 T3 桌面补验。
 
 - **派工额度**按事项所属 Bot 的 `maxConcurrent` 执行，未设置时为 10。持久任务在等待时约每 300 毫秒重试本地准入，待处理的聊天批次及同一事项旧派工的取消仍可暂缓启动。等待回复或验收的事项只要派工记录仍为 `running` 就继续占用额度。执行器接单后的执行与排队由执行器处理。
 - **验证关键词 `DEEPBOT_VERIFY_WORK`** 让本地模型调用 `work_start`，真实 sidecar 记录合成事项和后台分配。场景覆盖动态列表和详情，外部执行和产物使用对应的回归用例核对。
@@ -80,3 +82,4 @@ pnpm --silent verify env stop --run "$R"   # 用完停止实例。不再需要�
 - **聊天中的事项标题**：事项详情在动态页。Bot 调用 `work_review` 完成交付或调用 `say` 带 `workId` 汇报时，消息保存事项标题并在正文上方显示。历史交付与关联汇报可通过原有 `workId` 查回标题。排查时核对 `snapshot.messages[].workTitle`、`state/bots.ts` 的 `messageWorkTitle()` 和 `MessageBubble.tsx`。普通聊天和开工回执使用普通气泡。
 - **视觉上**：卡片、状态和脉冲点的规则见[事项列表](../../design/components/list.md)，停止和返回按钮见[按钮](../../design/components/button.md)。事项详情的弹窗宽度为 `min(760, 窗口宽 - 32)`。
 - **详情开合**：NSH 的 `Dialog` 淡入会一起改变遮罩和卡片的不透明度，聊天气泡会从已出现的卡片透出。事项详情使用 `animation="none"`。检查首帧用原生录屏，场景截图用于核对稳定后的界面。
+- **进度刷新与悬停**：事项快照更新时，详情弹窗、摘要/进度卡和动态列表内的同一事项行应保持原生节点。用 [后台刷新与交互状态](../../design/layout.md#后台刷新与交互状态) 的原生对照检查颜色与挂载记录，同时确认展开状态和改派菜单保留。

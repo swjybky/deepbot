@@ -1,4 +1,4 @@
-import { Text, token, untracked, View, type JSX } from "nsh";
+import { computed, Text, token, untracked, View, type JSX } from "nsh";
 import { Dialog } from "nsh/base";
 import { FeedbackHost } from "./FeedbackHost";
 import { IconButton } from "./IconButton";
@@ -24,11 +24,13 @@ export interface ModalProps {
  * a ModalCloseButton. Constraints: design/components/dialog.md
  */
 export function Modal(props: ModalProps) {
+  // A refresh of the data behind an open modal must keep the same native dialog mounted.
+  const open = computed(() => props.open);
   // Keep the form's mounted subtree when the sibling feedback layer changes.
   const content = untracked(() => props.children);
   return (
     <Dialog
-      open={props.open}
+      open={open()}
       animation={props.animation ?? "fade"}
       onOpenChange={({ open }) => !open && props.onClose()}
       backdropStyle={{ backgroundColor: token("overlay") }}

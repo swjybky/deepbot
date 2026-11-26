@@ -28,7 +28,7 @@
 | 资料库 | 长期记忆的增、改、删，产物预览 | `library-memory` | [library.md](library.md) |
 | Bot 配置、规矩与例行 | 名字、人设、模型、事项并发上限、文件夹，派活规矩，定时例行 | `bot-concurrency`、`bot-rules`、`bot-routines` | [bot-configuration.md](bot-configuration.md) |
 | 模型设置 | 新增、编辑、测试、设默认、删除模型配置 | `model-settings` | [model-settings.md](model-settings.md) |
-| 设置 | 通用、电脑（连接文件夹）、权限 | `settings-permissions` | [settings.md](settings.md) |
+| 设置 | 通用（含前台工具轮次上限）、电脑（连接文件夹）、权限 | `settings-permissions`、`foreground-turns`（原生） | [settings.md](settings.md) |
 | 连接 | 执行器设置、MCP 连接与 Bot 授权 | `connectors`、`mcp-management`、`remote-t3`、`remote-t3-lan`（原生） | [connectors.md](connectors.md) |
 | 启动、数据与重连 | 正式入口、ready 和快照、数据目录、重连 | 无界面场景，用 `env` 和 `api` 命令 | [runtime.md](runtime.md) |
 

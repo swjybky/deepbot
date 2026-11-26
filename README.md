@@ -47,6 +47,10 @@ pnpm test                           # 后端集成/权限/连接器测试 + NSH 
 
 也可以用 `pnpm --silent check` 执行同一检查。新克隆后运行 `git config --local core.hooksPath .githooks`，提交前会在隔离环境检查暂存区。
 
+## 打包与发布
+
+Linux、Windows 和 macOS 的按需远程打包、验证和发布步骤见[发布指南](docs/release.md)。
+
 ## 个人 Bot（架构第一部分 M0–M3）
 
 - 消息先落库再显示；连发合并，忙时插话；允许 `say` 多条回复和 `pass` 静默。多个 Bot 的常驻单聊互相隔离。

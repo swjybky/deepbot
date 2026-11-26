@@ -1,10 +1,11 @@
 /** Deterministic protocol peer for UI tests only. Production mounts App.tsx and the Rust transport. */
-import { host, mount, Storage } from "nsh";
+import { host, mount, openUrl, Storage } from "nsh";
 import { isAvailable, Window } from "nsh/desktop";
 import { AppShell } from "./ui/AppShell";
 import { infoTab, openModal, openWorkDetail, setInfoPanel, settingsSection } from "./ui/state/ui";
 import { notify, type Feedback } from "./ui/state/feedback";
 import { setAgentTransport } from "./ui/services/agent";
+import { setT3DesktopOpener } from "./ui/state/t3-thread";
 import type { EventPayload, HostMessage, ModelConfig, Snapshot } from "../../packages/agent/src/protocol";
 import { defaultSettings, emptySnapshot } from "../../packages/agent/src/defaults";
 import { decodeHostMessage } from "../../packages/agent/src/wire";
@@ -56,6 +57,21 @@ if (host.params.t3Cards) {
      ] } },
    ] };
 }
+if (host.params.t3ThreadLink === true || typeof host.params.t3ThreadLink === "string") {
+ const url = typeof host.params.t3ThreadLink === "string" ? host.params.t3ThreadLink : "https://app.t3.codes/threads/test-environment/mcp%3Atest-thread";
+ const assignee = host.params.t3RemoteLink ? "t3-remote-test" : "t3code";
+ const sessionRef = { id: "a1", assignee, url, conversationId: typeof host.params.t3ThreadId === "string" ? host.params.t3ThreadId : "mcp:test-thread" };
+ snapshot = { ...snapshot, typing: {}, connectors: snapshot.connectors.map(connector => connector.id === "t3code"
+   ? { ...connector, t3: { runtimeMode: "full-access", approvalAvailable: false, desktopLocal: !host.params.t3NonlocalEndpoint } } : connector),
+   assignments: snapshot.assignments.map(assignment => ({
+   ...assignment, assignee, ...(!host.params.t3UnmappedLink ? { sessionRef } : {}),
+ })), attentions: [{ id: "t3-link", botId: bot.id, threadId: bot.threadId, workId: "w1", assignmentId: "a1",
+   question: "请在 T3 Code 处理待回复请求", kind: "external", state: "open", options: [], createdAt: 2,
+   remoteRequest: { kind: "external" }, externalUrl: url,
+ }, { id: "ordinary-link", botId: bot.id, threadId: bot.threadId, question: "查看外部页面", kind: "external",
+   state: "open", options: [], createdAt: 3, externalUrl: "https://example.com/article",
+ }] };
+}
 if (host.params.t3Connections) snapshot = { ...snapshot, typing: {}, connectors: snapshot.connectors.map(connector => connector.id === "t3code"
  ? availableConnector(connector, { t3: { runtimeMode: "full-access", grantedMode: "full-access", approvalAvailable: true } }) : connector) };
 if (host.params.floatingHeader) snapshot = { ...snapshot, attentions: [], typing: {}, messages: Array.from({ length: 14 }, (_, index) => ({ id: `floating-${index}`, threadId: bot.threadId, author: { kind: "bot" as const, id: bot.id }, kind: "text" as const, text: `第 ${index + 1} 条对话\n这是用于核对悬浮效果的对话文本。滚动时，消息从 Bot 胶囊下方经过，图标和名称保持在顶部。\n\n页面优化完成后，检查胶囊周围仍能看到消息内容。`, createdAt: index + 1, requestId: `floating-${index}` })) };
@@ -88,6 +104,7 @@ host.on("fail-model", () => { failModel = true; });
 host.on("feedback", (value) => { const entry = value as Feedback; notify(entry.level, entry.message); });
 host.on("fail-next", () => { failNext = true; });
 host.on("agent", (event) => { if (isRecord(event)) pushLine(JSON.stringify({ ...event, seq: ++seq })); });
+host.on("refresh-snapshot", () => push({ type: "snapshot", snapshot }));
 host.on("disconnect", () => push(null));
 host.on("fatal", () => push({ type: "fatal", message: "后台进程已退出，请重新连接" }));
 setAgentTransport({
@@ -168,6 +185,7 @@ if (host.params.botConfiguration) { infoTab.set("configuration"); setInfoPanel(t
 if (host.params.routinePanel || host.params.panelActions) setInfoPanel(true);
 if (host.params.infoTab === "library" || host.params.infoTab === "configuration") infoTab.set(host.params.infoTab);
 if (host.params.workDetail) { openWorkDetail("w1"); setInfoPanel(true); }
+setT3DesktopOpener(async url => (await openUrl(url)).opened);
 mount(AppShell);
 
 // Timed toggles keep the test driver from fast-forwarding between animation frames.

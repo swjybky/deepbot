@@ -67,7 +67,7 @@ export function ModelSettings() {
         <DisclosureRow title={group().name} detail={`${group().models.length} 个模型`} icon="model" open={isOpen(group().provider)} onPress={() => toggle(group().provider)} testID={`model-group-${group().provider}`} />
         <View class="min-w-0 self-stretch mb-3 ml-4 flex-col gap-1 border-l border-border pl-4" style={{ display: isOpen(group().provider) ? "flex" : "none" }}>
           <Each of={group().models} key={c => c.id}>{(model) => <View class="min-w-0 self-stretch gap-2 py-3" testID={`model-card-${model().id}`}>
-            {editor()?.id === model().id ? <ModelEditor id={editor()!.id} original={editor()!.original} saving={!!pending()} onSave={save} onCancel={() => { editor.set(null); }} /> : <>
+            <If when={editor()?.id === model().id ? editor() : null} else={<>
               <View class="flex-row items-center gap-2">
                 <Text class="min-w-0 flex-1 text-body font-medium text-foreground">{model().name}</Text>
                 {model().id === runtime().defaultModelConfigId ? <Text class="rounded-full bg-chip px-2 py-0.5 text-caption text-muted-foreground">默认</Text> : null}
@@ -80,7 +80,9 @@ export function ModelSettings() {
                 <Button label={busyTest(model().id) ? "测试中" : "测试连接"} size="sm" variant="ghost" disabled={busyTest(model().id)} onPress={() => test(model())} testID={`model-test-${model().id}`} />
                 <Button label="删除" size="sm" variant="ghost" disabled={!!pending() || !!editor()} onPress={() => { void remove(model()); }} testID={`model-delete-${model().id}`} />
               </View>
-            </>}
+            </>}>{(active) =>
+              <ModelEditor id={active().id} original={active().original} saving={!!pending()} onSave={save} onCancel={() => { editor.set(null); }} />
+            }</If>
           </View>}</Each>
         </View>
       </View>}</Each>

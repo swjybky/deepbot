@@ -1,9 +1,10 @@
 // Entry: window chrome, then the UI. Architecture and design rules: DESIGN.md at the repository root.
-import { mount } from "nsh";
+import { mount, openUrl, platform } from "nsh";
 import { isAvailable, Window } from "nsh/desktop";
 import { AppShell } from "./ui/AppShell";
-import { Agent } from "deepbot/native";
+import { Agent, DesktopLinks } from "deepbot/native";
 import { setAgentTransport } from "./ui/services/agent";
+import { setT3DesktopOpener } from "./ui/state/t3-thread";
 
 export const TITLE_BAR_HEIGHT = 64;
 
@@ -16,4 +17,5 @@ if (isAvailable) {
 }
 
 setAgentTransport(Agent);
+setT3DesktopOpener(platform.os === "linux" ? DesktopLinks.openT3Thread : async url => (await openUrl(url)).opened);
 mount(AppShell);

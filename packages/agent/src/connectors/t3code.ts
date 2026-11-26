@@ -1,4 +1,5 @@
 import { fingerprint } from "../runtime/fingerprint.ts";
+import { isLoopbackHost } from "../runtime/http.ts";
 import { resolve } from "node:path";
 import type { Brief, ConnectorStatus, DispatchCapabilities, Permissions, RemoteAnswers, Report, SessionRef, T3Project, T3RuntimeMode } from "../protocol.ts";
 import { briefText, type Connector, type ConnectorTool, type DispatchPort } from "./port.ts";
@@ -211,7 +212,8 @@ export class T3CodeConnector implements Connector, DispatchPort {
       ...state,
       ...(!remote && listed ? { tools: listed.filter(tool => !internalTool(tool.name)).length } : {}),
       ...(!listed || T3_DISPATCH_TOOLS.every(name => listed.some(tool => tool.name === name)) ? { dispatch: { ...CAPABILITIES, permissionRelay: approvalAvailable } } : {}),
-      t3: { runtimeMode: this.runtimeMode, ...(grantedMode ? { grantedMode } : {}), approvalAvailable, ...(approvalReason ? { approvalReason } : {}) },
+      t3: { runtimeMode: this.runtimeMode, ...(grantedMode ? { grantedMode } : {}), approvalAvailable,
+        ...(approvalReason ? { approvalReason } : {}), desktopLocal: !remote && isLoopbackHost(new URL(this.endpoint).hostname) },
     };
   }
   async start(input: { assignmentId: string; brief: Brief }): Promise<SessionRef> {

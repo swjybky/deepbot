@@ -294,7 +294,7 @@ export type ConnectorStatus = {
   tools?: number;
   /** Present when work can be dispatched to it. */
   dispatch?: DispatchCapabilities;
-  t3?: { runtimeMode: T3RuntimeMode; grantedMode?: T3RuntimeMode; approvalAvailable: boolean; approvalReason?: string };
+  t3?: { runtimeMode: T3RuntimeMode; grantedMode?: T3RuntimeMode; approvalAvailable: boolean; approvalReason?: string; desktopLocal?: boolean };
   remoteT3?: { url: string; enabled: boolean; hasApprovalCredential: boolean };
   mcp?: McpAccess & { kind: "http" | "stdio"; enabled: boolean; hasCredential: boolean };
 };

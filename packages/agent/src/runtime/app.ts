@@ -43,7 +43,6 @@ import type {
   DispatchCapabilities,
   HostMessage,
   Memory,
-  RemoteAnswers,
   Report,
   RouteRule,
   Routine,
@@ -51,7 +50,7 @@ import type {
   Work,
 } from "../protocol.ts";
 import { decodeHostMessage } from "../wire.ts";
-import { DEFAULT_BOT_MAX_CONCURRENT, defaultExecutor } from "../defaults.ts";
+import { DEFAULT_BOT_MAX_CONCURRENT, DEFAULT_FOREGROUND_MAX_TURNS, defaultExecutor, isForegroundMaxTurns } from "../defaults.ts";
 import { allowedUrl, within } from "../policy/gate.ts";
 import { checkArtifactFile, hashArtifactFile, openArtifactFile, previewArtifactFile, type ArtifactFileContext } from "./artifact-files.ts";
 import {
@@ -745,7 +744,6 @@ export class DeepBotApp {
       model: this.resolveModel(bot, l),
       instructions: `${FRONT_INSTRUCTIONS}\n你的名字是${bot.name}。你的 workspace：${bot.workspace}；公共文件夹：${this.sharedFolder()}。面向用户用事项标题，不要展示 workId、assignmentId、requestId 或内部工具编号。${bot.instructions}`,
       cwd: bot.workspace,
-      maxTurns: l.data.settings.foregroundMaxTurns,
       extensions: [this.front, this.working, this.connectorTools, this.codemode],
       // Core tools stay function calls; connector tools are reached only through the one code mode tool.
       modelTools: [
@@ -756,6 +754,19 @@ export class DeepBotApp {
         ...(this.codemode.tools?.filter((t) => t.name === CODEMODE_TOOL_NAME) ?? []),
       ],
     };
+  }
+  async applyForegroundTurnLimit(conversationId: ConversationId, taskId: TaskId) {
+    if (!this.root) return;
+    await this.root.commit(async (tx) => {
+      const { run } = await tx.doc(LiveDoc, conversationId);
+      if (!run || run.taskId !== taskId || run.turns !== 0) return;
+      const l = await this.draft(tx);
+      const key = String(conversationId);
+      // The first generation can retry or resume. Keep its original limit through the run.
+      if (l.foregroundBudgetTasks?.[key] === String(taskId)) return;
+      await configure(tx, conversationId, { maxTurns: l.data.settings.foregroundMaxTurns });
+      l.foregroundBudgetTasks = { ...l.foregroundBudgetTasks, [key]: String(taskId) };
+    }, ctx);
   }
   async putBot(tx: Tx, l: Ledger, bot: Bot) {
     const previous = l.data.bots.find((b) => b.id === bot.id);
@@ -769,7 +780,7 @@ export class DeepBotApp {
       const c = await tx.createConversation({
         ownership: { kind: "ownerless" },
       });
-      await configure(tx, c.id, this.frontAgent(bot, l));
+      await configure(tx, c.id, { ...this.frontAgent(bot, l), maxTurns: l.data.settings.foregroundMaxTurns });
       l.data.bots.push(bot);
       l.data.threads.push({
         id: bot.threadId,
@@ -1093,16 +1104,6 @@ export class DeepBotApp {
               throw new Error("当前 Bot 的模型不支持图片输入，请切换支持图片的模型后重试");
             images = await saveChatImages(this.options.dataDir, cmd.images, this.imageProcessor);
           }
-          const m = addMessage(l, {
-            threadId: cmd.threadId,
-            author: { kind: "person", id: "me" },
-            kind: "text",
-            text: cmd.text.trim(),
-            requestId: cmd.requestId,
-            ...(images ? { images } : {}),
-            ...(cmd.replyTo ? { replyTo: cmd.replyTo } : {}),
-            ...(workId ? { workId } : {}),
-          });
           const opens = l.data.attentions.filter(
             (a) =>
               a.threadId === cmd.threadId &&
@@ -1117,20 +1118,25 @@ export class DeepBotApp {
             : opens.length === 1
               ? opens[0]
               : undefined;
-          if (
-            !images && attention &&
+          const messageText = cmd.text.trim();
+          const answer = !images && attention &&
             (attention.kind === "decision" ||
-              /^(同意|批准|确认|拒绝|不同意|取消|yes|no)$/i.test(
-                cmd.text.trim(),
-              ))
-          )
-            await this.answerAttention(
-              l,
-              tx,
-              attention,
-              cmd.text.trim(),
-              cmd.requestId,
-            );
+              /^(同意|批准|确认|拒绝|不同意|取消|yes|no)$/i.test(messageText))
+            ? attention
+            : undefined;
+          const messageWorkId = workId ?? answer?.workId;
+          const m = addMessage(l, {
+            threadId: cmd.threadId,
+            author: { kind: "person", id: "me" },
+            kind: "text",
+            text: messageText,
+            requestId: cmd.requestId,
+            ...(images ? { images } : {}),
+            ...(cmd.replyTo ? { replyTo: cmd.replyTo } : {}),
+            ...(messageWorkId ? { workId: messageWorkId } : {}),
+          });
+          if (answer)
+            await this.answerAttention(l, tx, answer, messageText, cmd);
           else
             queueInput(
               l,
@@ -1250,7 +1256,7 @@ export class DeepBotApp {
           if (!a || a.state !== "open") throw new Error("提问已处理或不存在");
           if (typeof cmd.value !== "string" || !cmd.value.trim())
             throw new Error("答复不能为空");
-          await this.answerAttention(l, tx, a, cmd.value, cmd.requestId, cmd.answers);
+          await this.answerAttention(l, tx, a, cmd.value, cmd);
           break;
         }
         case "work.cancel":
@@ -1318,16 +1324,19 @@ export class DeepBotApp {
               }),
             );
           }
+          if (s.foregroundMaxTurns !== undefined) {
+            if (!isForegroundMaxTurns(s.foregroundMaxTurns))
+              throw new Error("foregroundMaxTurns 超出范围");
+            l.data.settings.foregroundMaxTurns = s.foregroundMaxTurns;
+          }
           for (const key of [
             "debounceMs",
-            "foregroundMaxTurns",
             "maxConcurrent",
           ] as const)
             if (s[key] !== undefined) {
               const n = s[key]!;
               const min = key === "debounceMs" ? 0 : 1;
-              const max =
-                key === "debounceMs" ? 5000 : key === "maxConcurrent" ? 16 : 32;
+              const max = key === "debounceMs" ? 5000 : 16;
               if (!Number.isInteger(n) || n < min || n > max)
                 throw new Error(`${key} 超出范围`);
               l.data.settings[key] = n;
@@ -1435,13 +1444,14 @@ export class DeepBotApp {
     tx: Tx,
     a: Attention,
     value: string,
-    inputId: string,
-    answers?: RemoteAnswers,
+    source: Extract<HostMessage, { type: "message.send" | "message.send-images" | "attention.reply" }>,
   ) {
+    const inputId = source.requestId;
     const approved =
       /^(同意|批准|确认|继续|允许|yes|approve|approved)$/i.test(value.trim()) ||
       (a.id.startsWith("dispatch:") && value === a.options[0]);
     if (a.remoteRequest) {
+      let answers = source.type === "attention.reply" ? source.answers : undefined;
       const reportId = a.id.slice("report-attention:".length);
       const active = l.data.assignments.find(assignment => assignment.id === a.assignmentId && assignment.state === "running");
       if (a.remoteRequest.kind === "external") throw new Error("请打开 T3 Code 处理此请求");
@@ -1557,14 +1567,16 @@ export class DeepBotApp {
         touchWork(l, w.id);
       }
     }
-    addMessage(l, {
-      threadId: a.threadId,
-      author: { kind: "person", id: "me" },
-      kind: "text",
-      text: value,
-      requestId: `attention-answer:${inputId}`,
-      ...(a.workId ? { workId: a.workId } : {}),
-    });
+    if (source.type === "attention.reply") {
+      addMessage(l, {
+        threadId: a.threadId,
+        author: { kind: "person", id: "me" },
+        kind: "text",
+        text: value,
+        requestId: `attention-answer:${inputId}`,
+        ...(a.workId ? { workId: a.workId } : {}),
+      });
+    }
   }
   openAttention(l: Ledger, input: Omit<Attention, "state" | "createdAt">) {
     const old = l.data.attentions.find((a) => a.id === input.id);
@@ -2928,6 +2940,12 @@ function migrateLedger(l: Ledger, workspaceOf: (botId: string) => string) {
     delete x.executorId;
   };
   data.settings.executor ??= defaultExecutor();
+  if (!l.foregroundTurnDefaultUpgraded) {
+    // Old ledgers stored the same 8 for the default and an explicit choice.
+    if (data.settings.foregroundMaxTurns === 8 || data.settings.foregroundMaxTurns == null)
+      data.settings.foregroundMaxTurns = DEFAULT_FOREGROUND_MAX_TURNS;
+    l.foregroundTurnDefaultUpgraded = true;
+  }
   for (const bot of data.bots) {
     const legacy = bot as Partial<Bot> & { cwd?: string; enabledExecutors?: string[] };
     bot.maxConcurrent ??= DEFAULT_BOT_MAX_CONCURRENT;

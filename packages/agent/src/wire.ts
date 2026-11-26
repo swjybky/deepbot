@@ -79,7 +79,7 @@ const connector: Guard<ConnectorStatus> = shape({
 }, {
   reason: string, tools: number,
   dispatch: shape({ steer: boolean, cancel: boolean, reattach: boolean, permissionRelay: boolean, stream: boolean }),
-  t3: shape({ runtimeMode: mode, approvalAvailable: boolean }, { grantedMode: mode, approvalReason: string }),
+  t3: shape({ runtimeMode: mode, approvalAvailable: boolean }, { grantedMode: mode, approvalReason: string, desktopLocal: boolean }),
   remoteT3: shape({ url: string, enabled: boolean, hasApprovalCredential: boolean }),
   mcp: shape({ ...mcpAccessFields, kind: oneOf("http", "stdio"), enabled: boolean, hasCredential: boolean }),
 });

@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import {
+  GenerationTask,
   configure,
   defineExtension,
   defineTool,
@@ -29,6 +30,14 @@ async function ownWork(app: DeepBotApp, api: ToolExecutionApi, id: string) {
 export function createFrontExtension(app: DeepBotApp) {
   return defineExtension({
     name: "deepbot.front",
+    hooks: [
+      hook(GenerationTask, {
+        beforeRequest: async (_request, api) => {
+          await app.applyForegroundTurnLimit(api.conversationId, api.taskId);
+          return undefined;
+        },
+      }),
+    ],
     sections: [
       section("deepbot_state", async (input, context) => {
         const l = await app.readLedger(input.read, context);

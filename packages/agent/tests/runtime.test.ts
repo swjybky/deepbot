@@ -9,6 +9,7 @@ import type { AssistantMessage, Message as ModelMessage, Model, Api, TranscriptC
 import { MemoryStorage } from "@earendil-works/pi-durable";
 import { DeepBotApp } from "../src/runtime/app.ts";
 import { ctx } from "../src/runtime/conversation-values.ts";
+import { LedgerDoc } from "../src/work/ledger.ts";
 import { readConnectorsConfig } from "../src/connectors/config.ts";
 import { T3CodeConnector } from "../src/connectors/t3code.ts";
 import type { Connector, DispatchPort } from "../src/connectors/port.ts";
@@ -86,6 +87,88 @@ async function fixture(options:{script?:Script;connectors?:Connector[];persisten
 }
 const send=(app:DeepBotApp,id:string,value:string,botId="xiaocai")=>app.command({type:"message.send",requestId:id,botId,threadId:`dm:${botId}`,text:value});
 const openWork=(app:DeepBotApp,key:string,assignee="fixture")=>app.createWork("xiaocai",{title:key,goal:key,criteria:["提供实际结果"],assignee},key);
+
+test("foreground tool limit upgrades legacy 8 once, preserves custom values and survives restart", async () => {
+ const f = await fixture({ persistent: true });
+ let app = f.app;
+ const restart = async () => {
+  await app.close();
+  app = await f.open();
+  return (await app.ledger()).data.settings.foregroundMaxTurns;
+ };
+ const legacy = async (value: number) => {
+  const root = app["root"];
+  await root.commit(async tx => {
+   const l = await tx.doc(LedgerDoc, root.id);
+   delete l.foregroundTurnDefaultUpgraded;
+   l.data.settings.foregroundMaxTurns = value;
+  }, ctx);
+ };
+ try {
+  assert.equal((await app.ledger()).data.settings.foregroundMaxTurns, 24);
+  await legacy(17);
+  assert.equal(await restart(), 17);
+  await legacy(8);
+  assert.equal(await restart(), 24);
+  for (const value of [0, 1.5, 33]) {
+   await assert.rejects(app.command({
+    type: "settings.update", requestId: `invalid-turns-${value}`, settings: { foregroundMaxTurns: value },
+   }), /foregroundMaxTurns 超出范围/);
+  }
+  assert.equal((await app.ledger()).data.settings.foregroundMaxTurns, 24);
+  await app.command({ type: "settings.update", requestId: "choose-eight", settings: { foregroundMaxTurns: 8 } });
+  assert.equal(await restart(), 8);
+ } finally {
+  await app.close();
+  await rm(f.dataDir, { recursive: true, force: true });
+ }
+});
+
+test("a foreground run keeps its tool limit while the next run takes the saved limit", async () => {
+ const release = Promise.withResolvers<void>();
+ const counts = { first: 0, next: 0, background: 0 };
+ const f = await fixture({ script: async messages => {
+  const prompt = content(messages.findLast(m => m.role === "user"));
+  if (prompt.includes("执行派工")) {
+   return ++counts.background <= 10 ? call("report_progress", { text: "后台验证进行中" }) : text("后台超过八轮");
+  }
+  if (prompt.includes("派活结构化汇报")) return call("pass");
+  if (prompt.includes("第一项前台验证")) {
+   if (++counts.first === 1) {
+    await release.promise;
+   }
+   return counts.first <= 10 ? call("say", { text: `第一项工具结果 ${counts.first}` }) : text("前台超过八轮");
+  }
+  if (prompt.includes("第二项前台验证")) {
+   ++counts.next;
+   return call("say", { text: `第二项工具结果 ${counts.next}` });
+  }
+  return call("pass");
+ } });
+ const { app } = f;
+ try {
+  await app.command({ type: "bot.upsert", requestId: "bot-concurrency", bot: { id: "xiaocai", name: "小菜", maxConcurrent: 2 } });
+  await send(app, "turns-first", "第一项前台验证");
+  await eventually(() => counts.first === 1, "first model request paused");
+  await app.command({ type: "settings.update", requestId: "save-turns", settings: { foregroundMaxTurns: 8 } });
+  release.resolve();
+  const snapshot = async () => (await app.ledger()).data;
+  await eventually(async () => (await snapshot()).messages.some(m => m.text === "前台超过八轮"), "first run finished ten tool rounds");
+  assert.equal(counts.first, 11);
+  await send(app, "turns-next", "第二项前台验证");
+  await eventually(async () => (await snapshot()).errors["dm:xiaocai"] === "turn_limit: 8 turns", "next run capped at eight");
+  await eventually(() => counts.background === 11, "background continuation exceeds the foreground cap");
+  const state = await snapshot();
+  assert.equal(counts.next, 8);
+  assert.equal(state.bots[0]?.maxConcurrent, 2);
+  assert.equal(state.settings.foregroundMaxTurns, 8);
+  assert.equal(state.messages.filter(m => m.text.startsWith("第二项工具结果")).length, 8);
+  assert.equal(state.assignments.filter(a => a.assignee === "self").length, 1);
+ } finally {
+  release.resolve();
+  await f.cleanup();
+ }
+});
 
 test("invalid connected folders report targeted Chinese errors and preserve the existing settings", async () => {
  const f = await fixture();
@@ -649,6 +732,57 @@ test("opening a chat link uses its Bot's current file authorization and the shar
  } finally {
   await f.cleanup();
   await rm(outside, { recursive: true, force: true });
+ }
+});
+
+test("composer and card answers each persist one message and relay it once to the original assignment", async t => {
+ const executor = new FixtureConnector();
+ const deliver = t.mock.method(executor, "send");
+ const { app, events, cleanup } = await fixture({ connectors: [executor] });
+ try {
+  const work = await openWork(app, "answer-work");
+  await eventually(() => executor.records.has(work.assignmentId!), "assignment started");
+  const openQuestion = (id: string) => app.mutate(l => app.openAttention(l, {
+   id, botId: "xiaocai", threadId: work.threadId, workId: work.id, assignmentId: work.assignmentId!,
+   kind: "decision", question: "继续吗？", options: ["继续"],
+  }));
+  await openQuestion("composer-question");
+  const composer = { type: "message.send", requestId: "composer-answer", botId: "xiaocai", threadId: work.threadId, text: "继续" } as const;
+  await assert.rejects(app.command({ ...composer, replyTo: "missing" }), /引用的消息不存在/);
+  assert.equal((await app.ledger()).data.attentions.find(a => a.id === "composer-question")?.state, "open");
+  assert.equal((await app.ledger()).data.messages.filter(m => m.author.kind === "person").length, 0);
+
+  await app.command(composer);
+  const first = (await app.ledger()).data.messages.filter(m => m.author.kind === "person");
+  assert.deepEqual(first.map(m => ({ requestId: m.requestId, workId: m.workId })), [
+   { requestId: composer.requestId, workId: work.id },
+  ]);
+  await app.command(composer);
+  await assert.rejects(app.command({ ...composer, text: "其他" }), /requestId 已被其他内容使用/);
+  assert.deepEqual((await app.ledger()).data.messages.filter(m => m.author.kind === "person"), first);
+  assert.equal(events.filter(e => e.type === "ack" && e.requestId === composer.requestId).length, 2);
+
+  await openQuestion("card-question");
+  const card = { type: "attention.reply", requestId: "card-answer", attentionId: "card-question", value: "继续" } as const;
+  await app.command(card);
+  await app.command(card);
+  await assert.rejects(app.command({ ...card, requestId: "second-card-answer" }), /已处理/);
+  await eventually(() => deliver.mock.callCount() >= 2, "both answers reached the connector");
+  const l = await app.ledger();
+  assert.deepEqual(l.data.messages.filter(m => m.author.kind === "person").map(m => ({
+   requestId: m.requestId, workId: m.workId, text: m.text,
+  })), [
+   { requestId: composer.requestId, workId: work.id, text: "继续" },
+   { requestId: `attention-answer:${card.requestId}`, workId: work.id, text: "继续" },
+  ]);
+  assert.deepEqual(l.data.attentions.map(a => a.state), ["resolved", "resolved"]);
+  assert.deepEqual(l.inbox, []);
+  assert.deepEqual(deliver.mock.calls.map(({ arguments: [ref, input] }) => [ref.id, input]), [
+   [work.assignmentId, { inputId: composer.requestId, text: "继续" }],
+   [work.assignmentId, { inputId: card.requestId, text: "继续" }],
+  ]);
+ } finally {
+  await cleanup();
  }
 });
 

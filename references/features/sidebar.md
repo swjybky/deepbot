@@ -59,6 +59,7 @@ pnpm --silent verify ui run sidebar-switch --target native --run "$R"
 
 # 右键菜单由原生宿主提供
 pnpm --silent verify ui run sidebar-context --target native --run "$R"
+pnpm --silent verify ui run input-drafts --target native --run "$R"
 
 # 置顶、隐藏、改名都走 bot.upsert，必须带 name
 printf '%s' '{"bot":{"id":"verify-bot","name":"验证 Bot"}}' | pnpm --silent verify api call bot.upsert --run "$R"
@@ -83,6 +84,7 @@ pnpm --silent verify env stop --run "$R"   # 用完停止实例。不再需要�
 ## 5. 注意事项
 
 - **右键菜单**用 `rightClick` 和 `chooseMenuItem`。原生场景打开「重命名 Bot」后用回车保存。Chromium 宿主的系统菜单未打开，切换场景可以用两种宿主执行。菜单里的「删除」仍要求声明 `destructive`，并显式传入 `--apply`。
+- **重命名草稿在打开弹窗或切换目标 Bot 时回填。** 后台消息、事项和快照会重新计算 Bot 列表。回填时只跟踪弹窗是否打开和目标 ID，避免刷新列表时用原名覆盖草稿。`input-drafts` 在另一个 Bot 派发事项时核对草稿，随后检查保存、重开和取消。
 - **拖拽和删除确认框**由 [sidebar-drag.test.tsx](../../apps/desktop/tests/sidebar-drag.test.tsx) 和 [shell.test.tsx](../../apps/desktop/tests/shell.test.tsx) 覆盖。删除后端效果可用上面的 `api call` 验证。
 - **`bot.upsert` 必须带 `name`**，否则返回「Bot 名称和编号不能为空」。不能同时置顶和隐藏。隐藏时要同时带上 `pinned: false`，前端 `setBotHidden()` 就是这样做的。
 - **置顶顺序按置顶时间，最早置顶的在前。** 普通列表按创建时间和最后一条消息时间中较新的那个排序。时间戳由后端设置，前端传入的会被忽略。

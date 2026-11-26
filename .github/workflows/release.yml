@@ -1,0 +1,160 @@
+name: Package DeepBot
+run-name: DeepBot ${{ inputs.version }} · ${{ inputs.publish && 'Release' || 'Build only' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: App version X.Y.Z (without v)
+        type: string
+        required: true
+      publish:
+        description: Publish the existing vX.Y.Z tag as a GitHub Release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deepbot-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.commit.outputs.sha }}
+    steps:
+      - name: Select source
+        id: ref
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          version_re='^(0|[1-9][0-9]{0,3})(\.(0|[1-9][0-9]{0,3})){2}$'
+          if [[ ! "$VERSION" =~ $version_re ]]; then
+            echo "::error::Expected an X.Y.Z version without a v prefix."
+            exit 1
+          fi
+          tag="refs/tags/v$VERSION"
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF" != "$tag" ]]; then
+            echo "::error::Selected tag must be $tag."
+            exit 1
+          fi
+          if [[ "$PUBLISH" == true ]]; then
+            echo "ref=$tag" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+          persist-credentials: false
+      - name: Record immutable source
+        id: commit
+        shell: bash
+        run: |
+          test -f scripts/release/package.mjs
+          sha=$(git rev-parse HEAD)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Build source: \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: windows-x64
+            runner: windows-2025
+          - target: macos-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      BUILD_COMMIT: ${{ needs.source.outputs.commit }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.13.1
+          package-manager-cache: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+      - name: Install Linux build and smoke dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev xvfb xauth dbus-x11 desktop-file-utils
+      - name: Set Windows compiler stack
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "RUST_MIN_STACK=268435456" >> $env:GITHUB_ENV
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+      - name: Install pinned toolchains
+        run: |
+          cargo --version
+          node scripts/release/toolchain.mjs
+      - name: Prepare production Agent
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @deepbot/agent deploy --prod --legacy --config.node-linker=hoisted dist/release-agent
+      - name: Package and verify (Linux)
+        if: runner.os == 'Linux'
+        env:
+          GDK_BACKEND: x11
+        shell: bash
+        run: |
+          xvfb-run -a dbus-run-session -- node scripts/release/package.mjs "$RELEASE_VERSION"
+      - name: Package and verify (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: node scripts/release/package.mjs $env:RELEASE_VERSION
+      - name: Package and verify (macOS)
+        if: runner.os == 'macOS'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '14.0'
+        shell: bash
+        run: node scripts/release/package.mjs "$RELEASE_VERSION"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ matrix.target }}
+          path: dist/release/
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+
+  release:
+    if: inputs.publish
+    needs: [source, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.13.1
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: dist/incoming
+      - name: Verify assets and publish the draft
+        env:
+          BUILD_COMMIT: ${{ needs.source.outputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/publish.mjs

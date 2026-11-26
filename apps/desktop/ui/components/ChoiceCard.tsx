@@ -1,4 +1,4 @@
-import { signal, Text, token, View, type JSX } from "nsh";
+import { computed, signal, Text, token, View, type JSX } from "nsh";
 import { Input } from "nsh/base";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
@@ -41,25 +41,26 @@ export function ChoiceCard(props: {
   const expanded = signal(false);
   const chosen = signal("");
   const other = signal("");
-  const answered = () => props.answer !== undefined;
+  const answered = computed(() => props.answer !== undefined);
   const current = () => props.answer ?? (props.pending ? chosen() : "");
   const selected = (value: string) => props.selectedOptions?.includes(value) ?? current() === value;
   const answerIndex = () => { const index = props.options.indexOf(props.answer ?? ""); return index < 0 ? props.options.length : index; };
-  const expandable = () => !!props.detail || props.question.includes("\n") || props.question.length > 60;
+  const hasDetail = computed(() => !!props.detail);
+  const expandable = computed(() => hasDetail() || props.question.includes("\n") || props.question.length > 60);
   const choose = (value: string) => { if (!value.trim() || props.pending || answered()) return; chosen.set(value); props.onChoose(value); };
   const id = (suffix: string) => props.testID ? `${props.testID}-${suffix}` : undefined;
   const header = () => <>
     <View class="flex-row items-start gap-2">
       <Text class={`min-w-0 flex-1 text-body font-semibold ${answered() ? "text-muted-foreground" : "text-foreground"} ${expanded() ? "" : "line-clamp-2"}`}>{props.question}</Text>
-      {expandable() ? <Icon name={expanded() ? "chevronDown" : "chevronRight"} size={16} color={token("faint-foreground")} /> : null}
+      <If when={expandable()}><Icon name={expanded() ? "chevronDown" : "chevronRight"} size={16} color={token("faint-foreground")} /></If>
     </View>
-    {props.detail ? <Text testID={id("preview")} class={`text-label leading-relaxed text-muted-foreground ${expanded() ? "" : "line-clamp-2"}`}>{props.detail}</Text> : null}
+    <If when={hasDetail()}><Text testID={id("preview")} class={`text-label leading-relaxed text-muted-foreground ${expanded() ? "" : "line-clamp-2"}`}>{props.detail}</Text></If>
   </>;
   return (
     <View testID={props.testID} class={props.inline ? "w-full gap-1" : "w-full max-w-[560px] gap-1 self-start rounded-card border border-border bg-card p-2"}>
-      {expandable()
-        ? <Pressable onPress={() => expanded.set(!expanded())} accessibilityLabel={`${expanded() ? "收起" : "展开"}${props.label}`} testID={id("toggle")} class="gap-1.5 rounded-row px-2 py-2 hover:bg-secondary active:bg-chip">{header()}</Pressable>
-        : <View class="gap-1.5 px-2 py-2">{header()}</View>}
+      <If when={expandable()} else={<View class="gap-1.5 px-2 py-2">{header()}</View>}>
+        <Pressable onPress={() => expanded.set(!expanded())} accessibilityLabel={`${expanded() ? "收起" : "展开"}${props.label}`} testID={id("toggle")} class="gap-1.5 rounded-row px-2 py-2 hover:bg-secondary active:bg-chip">{header()}</Pressable>
+      </If>
       {answered()
         ? <View accessibilityState={{ selected: true }} testID={id("answer")} class="group flex-row items-center gap-3 rounded-row px-2 py-[7px]"><Badge index={answerIndex()} selected accent={props.accent} /><Text class="min-w-0 flex-1 text-body text-foreground">{props.answer}</Text></View>
         : <View role={props.multiple ? "group" : "radiogroup"} accessibilityLabel={props.question} class="gap-0.5">

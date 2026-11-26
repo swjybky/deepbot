@@ -95,7 +95,33 @@ export async function previewArtifactFile(context: ArtifactFileContext, input: s
   });
 }
 
+function requestDesktopOpen(program: string, args: string[]): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(program, args, { stdio: "ignore", signal: AbortSignal.timeout(8000) });
+    child.once("error", reject);
+    child.once("exit", resolve);
+  });
+}
+
+async function openOnLinux(path: string): Promise<void> {
+  try {
+    // GIO reports when it hands the file off. Some xdg-open backends wait
+    // for the application to quit, so use it only when GIO is unavailable.
+    const status = await requestDesktopOpen("gio", ["open", path]).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+      return requestDesktopOpen("xdg-open", [path]);
+    });
+    if (status === 0) return;
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException;
+    if (code === "ABORT_ERR") throw new Error("系统未及时确认打开文件，请检查默认应用");
+    if (code === "ENOENT") throw new Error("找不到系统文件打开器");
+  }
+  throw new Error("系统打开文件失败，请检查默认应用");
+}
+
 async function openInSystem(path: string): Promise<void> {
+  if (process.platform === "linux") return openOnLinux(path);
   const program = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
   await new Promise<void>((resolve, reject) => {
     const child = spawn(program, [path], { detached: true, stdio: "ignore", windowsHide: true });

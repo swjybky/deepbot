@@ -216,6 +216,33 @@ test("sidebar right-click menu pins, renames, hides and deletes bots", async () 
  expect(app.shows("id:sidebar-hidden-toggle")).toBe(false);
 });
 
+test("keeps the rename draft through unrelated Agent updates and discards it on cancel", async () => {
+ const app = await open("../FixtureApp.tsx", desktop);
+ const input = "id:rename-bot-name";
+ await app.waitFor("id:bot-other");
+ const rename = async (id: string) => {
+  await app.rightClick(`id:bot-${id}`);
+  await app.chooseMenuItem("重命名 Bot");
+  await app.waitFor(input);
+ };
+ await rename("other");
+ expect(app.value(input)).toBe("另一个 Bot");
+ await app.paste(input, { text: "新名称" });
+ await app.host.send("agent", { type: "thread.delta", threadId: "dm:xiaocai", typing: true, messages: [
+  { id: "background-progress", threadId: "dm:xiaocai", author: { kind: "bot", id: "xiaocai" },
+   kind: "text", text: "后台进度更新", createdAt: 2, requestId: "background-progress" },
+ ] });
+ await app.waitFor("text:后台进度更新");
+ expect(app.value(input)).toBe("另一个 Bot新名称");
+ await app.press("id:rename-bot >> text:取消");
+ expect(commands(app).filter(c => c.type === "bot.upsert")).toHaveLength(0);
+ await rename("xiaocai");
+ expect(app.value(input)).toBe("小菜");
+ await app.press("id:rename-bot >> text:取消");
+ await rename("other");
+ expect(app.value(input)).toBe("另一个 Bot");
+});
+
 test("sidebar marks bots unread from new bot messages and the menu, and opening reads them", async () => {
  const app = await open("../FixtureApp.tsx", desktop);
  await app.waitFor("id:bot-other");
@@ -548,6 +575,9 @@ test("model settings group providers and edit only on explicit save", async () =
  await app.clear("id:model-name"); await app.type("id:model-name", "共享模型");
  await app.type("id:model-url", "http://localhost:1234/v1");
  await app.press("id:model-input-mode"); await app.press("text:文本和图片");
+ await app.host.send("refresh-snapshot", null);
+ expect(app.value("id:model-name")).toBe("共享模型");
+ expect(app.value("id:model-url")).toBe("http://localhost:1234/v1");
  expect(commands(app).filter(c => c.type === "model.upsert")).toHaveLength(0);
  await app.press("id:model-group-openai"); await app.press("id:model-group-openai");
  await app.press("id:model-save");

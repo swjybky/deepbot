@@ -66,6 +66,22 @@ test("work detail dialog closes without replacing the activity list", async () =
  }
 });
 
+test("keeps the open assignee picker and expanded work details across progress updates", async () => {
+ const app = await open("../FixtureApp.tsx", { width: 1280, height: 1000, platform: "linux", host: { params: { workDetail: true } } });
+ const detail = work("w1", "running");
+ await app.waitFor("id:work-detail-w1");
+ await app.press("id:work-detail-w1-toggle");
+ await app.waitFor("label:收起整理资料");
+ await app.press("id:work-assignee");
+ await app.waitFor("text:T3 Code");
+ await app.host.send("agent", { type: "work.updated", work: {
+  ...detail, title: "整理资料", phase: "review", progress: "后台更新验收进度", revision: 2,
+ } });
+ await app.waitFor("text:后台更新验收进度");
+ expect(app.shows("text:T3 Code")).toBe(true);
+ expect(app.shows("label:收起整理资料")).toBe(true);
+});
+
 test("closing the work dialog leaves panel closure as a separate action", async () => {
  const app = await open("../FixtureApp.tsx", { width: 1280, height: 1000, platform: "linux", host: { params: { workDetail: true } } });
  await app.waitFor("id:work-detail-w1");

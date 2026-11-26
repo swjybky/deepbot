@@ -47,6 +47,8 @@ export type Ledger = {
   notifiedReports: string[];
   selfSubmissions: Record<string, string[]>;
   selfSeen: string[];
+  foregroundTurnDefaultUpgraded?: true;
+  foregroundBudgetTasks?: Record<string, string>;
   activeSources?: Record<string, string[]>;
   mcpPolicies?: McpPolicy[];
   pumpTaskId?: string;

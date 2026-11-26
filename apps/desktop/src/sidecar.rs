@@ -1,8 +1,7 @@
 //! The Node sidecar process and its stdio.
 //!
-//! Which script runs: `$DEEPBOT_AGENT` if set, else `packages/agent/src/main.ts`
-//! of this checkout (development). `$DEEPBOT_NODE` overrides the `node` binary.
-//! Installed launchers can set `$DEEPBOT_AGENT_CWD` to run outside the checkout.
+//! Installed apps resolve the Agent and Node relative to their executable.
+//! The development fallback uses the checkout and Node from PATH.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -23,10 +22,24 @@ fn lines() -> &'static (async_channel::Sender<String>, async_channel::Receiver<S
     LINES.get_or_init(async_channel::unbounded)
 }
 
-fn script() -> PathBuf {
-    std::env::var_os("DEEPBOT_AGENT").map(PathBuf::from).unwrap_or_else(|| {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/agent/src/main.ts")
-    })
+fn installed_runtime() -> Option<(PathBuf, PathBuf)> {
+    let exe = std::env::current_exe().ok()?;
+    let bin = exe.parent()?;
+    let resources = if cfg!(target_os = "macos") {
+        bin.parent()?.join("Resources")
+    } else {
+        bin.to_path_buf()
+    };
+    let runtime = resources.join("deepbot-runtime");
+    if !runtime.is_dir() {
+        return None;
+    }
+    let node = if cfg!(target_os = "macos") {
+        bin.join("node")
+    } else {
+        runtime.join(if cfg!(windows) { "node.exe" } else { "node" })
+    };
+    Some((runtime.join("agent"), node))
 }
 
 pub fn start() -> Result<(), String> {
@@ -42,19 +55,31 @@ pub fn start() -> Result<(), String> {
         while lines().1.try_recv().is_ok() {}
     }
 
-    let script = script();
-    let node = std::env::var("DEEPBOT_NODE").unwrap_or_else(|_| "node".to_owned());
-    let cwd = std::env::var_os("DEEPBOT_AGENT_CWD")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
-    let mut child = Command::new(&node)
+    let (agent, default_node, default_cwd) = if let Some((agent, node)) = installed_runtime() {
+        (agent.clone(), node, agent)
+    } else {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        (root.join("packages/agent"), PathBuf::from("node"), root)
+    };
+    let setting = |key, default| std::env::var_os(key).map(PathBuf::from).unwrap_or(default);
+    let script = setting("DEEPBOT_AGENT", agent.join("src/main.ts"));
+    let node = setting("DEEPBOT_NODE", default_node);
+    let cwd = setting("DEEPBOT_AGENT_CWD", default_cwd);
+    let mut command = Command::new(&node);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
         .arg(&script)
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| format!("could not start `{node} {}`: {e}", script.display()))?;
+        .map_err(|e| format!("could not start `{} {}`: {e}", node.display(), script.display()))?;
 
     let stdin = child.stdin.take().ok_or("sidecar has no stdin")?;
     let stdout = child.stdout.take().ok_or("sidecar has no stdout")?;

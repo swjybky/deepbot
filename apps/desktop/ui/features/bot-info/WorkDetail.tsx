@@ -1,5 +1,6 @@
-import { effect, Scroll, signal, untracked, View, windowSize } from "nsh";
-import { ActivityCard, Button, EmptyState, FormField, Group, IconButton, ListRow, Modal, ModalHeader, SectionLabel, SelectField } from "../../components";
+import { computed, effect, Scroll, signal, untracked, View, windowSize } from "nsh";
+import { ActivityCard, Button, ChoiceCard, EmptyState, FormField, Group, IconButton, ListRow, Modal, ModalHeader, SectionLabel, SelectField } from "../../components";
+import { T3ThreadButtons } from "../../components/T3ThreadButtons";
 import { currentWorks } from "../../state/bots";
 import { assigneeOptions, cancelWork, phaseLabels, queryT3Projects, reassignWork, requestPending, requestStatus, runtime, type Artifact, type Work } from "../../state/runtime";
 import { closeModal, modal, workDetailId } from "../../state/ui";
@@ -45,11 +46,15 @@ function WorkDetail(props: { work: Work }) {
     if (requestStatus(reassignment())?.status === "succeeded") untracked(() => target.set(""));
   });
   const artifacts = () => runtime().artifacts.filter((a) => a.workId === props.work.id);
+  const externalRequests = () => runtime().attentions.filter(request => request.workId === props.work.id &&
+    request.assignmentId === props.work.assignmentId && request.state === "open" && request.remoteRequest?.kind === "external");
   const preview = signal<Artifact | null>(null);
+  const canReassign = computed(() => props.work.state === "open");
+  const showStop = computed(() => !preview() && props.work.state !== "ended");
   const summary = () => [props.work.goal, "", "验收标准", ...props.work.criteria.map((c) => `· ${c}`)].join("\n");
   return <>
     <ModalHeader title={preview()?.name ?? "事项详情"} onClose={closeModal} actions={
-      !preview() && props.work.state !== "ended"
+      showStop()
         ? <IconButton icon="stop" label="停止事项" onPress={() => cancelWork(props.work.id)} testID={`cancel-work-${props.work.id}`} />
         : null
     } />
@@ -63,10 +68,10 @@ function WorkDetail(props: { work: Work }) {
     <ActivityCard title={props.work.title} status={phaseLabels[props.work.phase]} detail={summary()} testID={`work-detail-${props.work.id}`} />
     <SectionLabel title="执行" />
     <Group density="compact">
-      <ListRow title="派活对象" description={assigneeName()} trailing={props.work.state === "open"
+      <ListRow title="派活对象" description={assigneeName()} trailing={canReassign()
         ? <SelectField size="sm" accessibilityLabel={`改派 ${props.work.title}`} value={target() || assignment()?.assignee || "self"} options={assigneeOptions()}
             disabled={requestPending(reassignment())} onChange={updateAssignee} testID="work-assignee" /> : null} />
-      {target() && props.work.state === "open" ? <View class="gap-2 px-[18px] py-2.5">
+      {target() && canReassign() ? <View class="gap-2 px-[18px] py-2.5">
         {projects()?.length ? <FormField label="远端项目">
           <SelectField form accessibilityLabel="选择项目并改派" value="" options={[{ value: "", title: "选择项目并改派", disabled: true },
             ...projects()!.map(project => ({ value: project.id, title: project.title ? `${project.title} · ${project.workspaceRoot}` : project.workspaceRoot }))]}
@@ -80,7 +85,13 @@ function WorkDetail(props: { work: Work }) {
       <ListRow title="目录" description={assignment()?.sessionRef?.remoteCwd ?? props.work.cwd} />
     </Group>
     <ActivityCard title="进度" status="" detail={props.work.progress || "等待派工"} testID={`work-progress-${props.work.id}`} />
-    {props.work.botApprovals?.length ? <ActivityCard title="Bot 已代批" status="" detail={props.work.botApprovals.join("\n")} testID={`work-approvals-${props.work.id}`} /> : null}
+    <Each of={externalRequests()} key={request => request.id}>{request => {
+      const actions = <T3ThreadButtons attention={request()} />;
+      return <ChoiceCard question={request().question} label="对方在等你" options={[]} allowOther={false} onChoose={() => {}} testID={`attention-${request().id}`}>{actions}</ChoiceCard>;
+    }}</Each>
+    <If when={props.work.botApprovals?.length ? props.work.botApprovals : null}>{(approvals) =>
+      <ActivityCard title="Bot 已代批" status="" detail={approvals().join("\n")} testID={`work-approvals-${props.work.id}`} />
+    }</If>
     <SectionLabel title="产物" />
     <Each of={artifacts()} key={(a) => a.id}>{(artifact) => <ArtifactCard artifact={artifact()} onPreview={(item) => preview.set(item)} />}</Each>
     {artifacts().length === 0 ? <EmptyState text="还没有产物，完成后会出现在这里" /> : null}

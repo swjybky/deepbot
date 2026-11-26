@@ -58,6 +58,68 @@ test("the 其他 row sends typed text as the answer", async () => {
  await shot(app, "/tmp/deepbot-choice-other-answered.png");
 });
 
+test("an answered choice card retains expansion through full snapshots", async () => {
+ const app = await open("../FixtureApp.tsx", { ...desktop, host: { params: { longCards: true } } });
+ const expand = "id:attention-q1 >> label:展开需要你批准";
+ const collapse = "id:attention-q1 >> label:收起需要你批准";
+ await app.waitFor(expand);
+ await app.wait(400);
+ await app.press(expand);
+ await app.waitFor(collapse);
+ await app.press("id:attention-q1-option-批准");
+ await app.waitFor("id:attention-q1-answer");
+ expect(app.shows(collapse)).toBe(true);
+ await app.host.send("refresh-snapshot", null);
+ expect(app.shows(collapse)).toBe(true);
+ expect(app.shows("text:/完整动作结尾/")).toBe(true);
+ await app.press(collapse);
+ await app.waitFor(expand);
+ await app.host.send("refresh-snapshot", null);
+ expect(app.shows(expand)).toBe(true);
+});
+
+test("remote questions update in place and keep expansion by question id", async () => {
+ const app = await open("../FixtureApp.tsx", desktop);
+ const question = {
+  id: "first",
+  question: "请选择\n详细说明第一段\n详细说明第二段",
+  options: [{ label: "继续", value: "continue" }],
+ };
+ const next = { ...question, id: "second", question: "请确认\n下一题详细说明\n下一题全文结尾" };
+ const update = (questions: (typeof question)[]) => app.host.send("agent", {
+  type: "attention.opened",
+  attention: {
+   id: "remote-expansion", botId: "xiaocai", threadId: "dm:xiaocai", kind: "decision",
+   question: "请确认", options: [], state: "open", createdAt: 3, remoteRequest: { kind: "question", questions },
+  },
+ });
+ const expand = "label:展开T3 Code 提问";
+ const collapse = "label:收起T3 Code 提问";
+ await app.waitFor("id:attention-q1");
+ await update([question]);
+ await app.waitFor(expand);
+ await app.wait(400);
+ await app.press(expand);
+ await app.waitFor(collapse);
+ await update([{ ...question, question: question.question + "\n刷新后的全文结尾" }]);
+ await app.waitFor("text:/刷新后的全文结尾/");
+ expect(app.shows(collapse)).toBe(true);
+ await update([next]);
+ await app.waitFor(expand);
+ expect(app.shows(collapse)).toBe(false);
+
+ await update([question, next]);
+ const first = "id:attention-remote-expansion-first";
+ const second = "id:attention-remote-expansion-second";
+ await app.waitFor(`${first} >> ${expand}`);
+ await app.press(`${first} >> ${expand}`);
+ await app.waitFor(`${first} >> ${collapse}`);
+ await update([{ ...question, question: question.question + "\n多题刷新后的全文结尾" }, next]);
+ await app.waitFor("text:/多题刷新后的全文结尾/");
+ expect(app.shows(`${first} >> ${collapse}`)).toBe(true);
+ expect(app.shows(`${second} >> ${expand}`)).toBe(true);
+});
+
 test("conversation accents take a darker bot color under white text", async () => {
  for (const [color, file] of [["#F0283C", "red"], ["#9EC5A7", "light"]] as const) {
   const text = "#ffffffff";

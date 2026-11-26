@@ -19,12 +19,15 @@
 4. 后端断开时，头部右上角出现「重连」按钮（`id:agent-reconnect`），同时弹出「本机服务已退出，请重新连接」之类的错误提示。点「重连」后，界面先发 `sync`，再重发还没收到确认的命令。
 5. 「电脑」设置页和动态页里显示「本机服务已连接」或「未连接」。
 
+发布版按[发布指南](../../docs/release.md)下载并安装，在应用菜单或「应用程序」中打开。打包入口从安装位置解析随包的 Node 和 Agent。
+
 ## 3. 前后端对应
 
 - **覆盖** 接口 `sync`
 
 | 层 | 位置 |
 | --- | --- |
+| 打包与发布 | [GitHub 工作流](../../.github/workflows/release.yml) 和[打包脚本](../../scripts/release/package.mjs)核对安装包、包内 Agent 协议和原生启动。 |
 | 入口 | [start.sh](../../start.sh) → [App.tsx](../../apps/desktop/App.tsx) → [AppShell.tsx](../../apps/desktop/ui/AppShell.tsx)（调用 `connectAgent()`） |
 | 传输 | `startAgent()` 负责启动、`sync` 和处理断线。待确认的命令以原始 JSON 行重发，并沿用初次提交的 `requestId`。 [services/agent.ts](../../apps/desktop/ui/services/agent.ts) · [Rust 宿主](../../apps/desktop/src/sidecar.rs) |
 | 前端状态 | `runtime()` 提供只读快照，`requestStatus()` 查询请求状态，`command()` 提交协议命令。 [state/runtime.ts](../../apps/desktop/ui/state/runtime.ts) |

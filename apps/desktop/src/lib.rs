@@ -7,6 +7,7 @@
 //! JSON lines both ways; `App.tsx` parses them (see `packages/agent/src/protocol.ts`).
 
 mod sidecar;
+mod t3_link;
 
 use nsh_core::prelude::*;
 
@@ -14,6 +15,19 @@ use nsh_core::prelude::*;
 #[native_module("deepbot/native")]
 fn native(registry: &mut Registry) {
     registry.module::<Agent>();
+    registry.module::<DesktopLinks>();
+}
+
+/// Local desktop URI dispatch with a result from the system launcher.
+#[module]
+pub struct DesktopLinks;
+
+#[module]
+impl DesktopLinks {
+    /// Open a scoped T3 thread using the Linux desktop's registered protocol handler.
+    pub async fn open_t3_thread(uri: String) -> Result<bool, String> {
+        t3_link::open_thread(uri).await
+    }
 }
 
 /// The agent sidecar: a Node process running Pi Durable, spoken to in JSON lines.
